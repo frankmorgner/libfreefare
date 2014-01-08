@@ -23,6 +23,7 @@
 #include "config.h"
 
 #include <openssl/des.h>
+#include <assert.h>
 
 /*
  * Endienness macros
@@ -334,6 +335,7 @@ struct mifare_ultralight_tag {
  */
 #define BUFFER_APPEND(buffer_name, data) \
     do { \
+	assert( (BUFFER_SIZE(buffer_name) + 1 <= __##buffer_name##_size) && (BUFFER_SIZE(buffer_name) + 1 >= BUFFER_SIZE(buffer_name)) ); \
 	buffer_name[__##buffer_name##_n++] = data; \
     } while (0)
 
@@ -342,6 +344,7 @@ struct mifare_ultralight_tag {
  */
 #define BUFFER_APPEND_BYTES(buffer_name, data, size) \
     do { \
+	assert( (BUFFER_SIZE(buffer_name) + size <= __##buffer_name##_size) && (BUFFER_SIZE(buffer_name) + size >= BUFFER_SIZE(buffer_name)) ); \
 	size_t __n = 0; \
 	while (__n < size) { \
 	    buffer_name[__##buffer_name##_n++] = ((uint8_t *)data)[__n++]; \
@@ -362,6 +365,7 @@ struct mifare_ultralight_tag {
     do { \
 	size_t __data_size = data_size; \
 	size_t __field_size = field_size; \
+	assert( (BUFFER_SIZE(buffer) + __data_size <= __##buffer##_size) && (BUFFER_SIZE(buffer) + __data_size >= BUFFER_SIZE(buffer)) ); \
 	while (__field_size--, __data_size--) { \
 	    buffer[__##buffer##_n++] = ((uint8_t *)&data)[__field_size]; \
 	} \
@@ -369,6 +373,7 @@ struct mifare_ultralight_tag {
 #else
 #define BUFFER_APPEND_LE(buffer, data, data_size, field_size) \
     do { \
+	assert( (BUFFER_SIZE(buffer) + data_size <= __##buffer##_size) && (BUFFER_SIZE(buffer) + data_size >= BUFFER_SIZE(buffer)) ); \
 	memcpy (buffer + __##buffer##_n, &data, data_size); \
 	__##buffer##_n += data_size; \
     } while (0)

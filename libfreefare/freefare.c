@@ -75,6 +75,9 @@ freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai)
 
     /* Allocate memory for the found MIFARE target */
     switch (tag_info->type) {
+    case NO_TAG_TYPE:
+	tag = NULL;
+	break;
     case CLASSIC_1K:
     case CLASSIC_4K:
 	tag = mifare_classic_tag_new ();
@@ -205,6 +208,8 @@ freefare_free_tag (MifareTag tag)
 {
     if (tag) {
         switch (tag->tag_info->type) {
+        case NO_TAG_TYPE:
+            break;
         case CLASSIC_1K:
         case CLASSIC_4K:
             mifare_classic_tag_free (tag);

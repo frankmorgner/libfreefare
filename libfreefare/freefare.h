@@ -31,6 +31,7 @@
 #endif // __cplusplus
 
 enum mifare_tag_type {
+    NO_TAG_TYPE = 0,
     ULTRALIGHT,
     ULTRALIGHT_C,
 //    MINI,

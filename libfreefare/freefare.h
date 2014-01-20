@@ -43,17 +43,44 @@ enum mifare_tag_type {
     DESFIRE
 };
 
+typedef uint32_t FreefareFlags;
+#define FREEFARE_FLAG_READER_ALL	 (1UL<<0)
+#define FREEFARE_FLAG_READER_LIBNFC	 (1UL<<1)
+
+#define FREEFARE_FLAG_AUTOCLOSE		 (1UL<<8)
+#define FREEFARE_FLAG_DISABLE_ISO14443_4 (1UL<<9)
+
 struct mifare_tag;
 typedef struct mifare_tag *MifareTag;
 
 struct mifare_desfire_key;
 typedef struct mifare_desfire_key *MifareDESFireKey;
 
+struct freefare_context;
+typedef struct freefare_context *FreefareContext;
+
 typedef uint8_t MifareUltralightPageNumber;
 typedef unsigned char MifareUltralightPage[4];
 
+typedef union { nfc_context *libnfc; } FreefareReaderContext;
+typedef union { nfc_device *libnfc; } FreefareReaderDevice;
+
+#define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
+#define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
+
+FreefareContext	 freefare_init (FreefareFlags flags);
+int		 freefare_context_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderContext context);
+int		 freefare_context_remove (FreefareContext ctx, int handle);
+int		 freefare_device_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderDevice device);
+int		 freefare_device_remove (FreefareContext ctx, int handle);
+MifareTag	 freefare_tag_first (FreefareContext ctx, enum mifare_tag_type tag_type);
+MifareTag	 freefare_tag_next (FreefareContext ctx);
+MifareTag	*freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type);
+void		 freefare_exit (FreefareContext ctx);
+
 MifareTag	*freefare_get_tags (nfc_device *device);
 MifareTag	 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai);
+
 enum mifare_tag_type freefare_get_tag_type (MifareTag tag);
 const char	*freefare_get_tag_friendly_name (MifareTag tag);
 char		*freefare_get_tag_uid (MifareTag tag);

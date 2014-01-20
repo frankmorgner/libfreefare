@@ -40,6 +40,11 @@ struct supported_tag supported_tags[] = {
     { ULTRALIGHT,   "Mifare UltraLight",            0x00, 0, 0, { 0x00 }, NULL },
 };
 
+#define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC)
+#define FREEFARE_FLAG_MASK_GLOBAL_INHERIT (FREEFARE_FLAG_DISABLE_ISO14443_4)
+
+#define DEFAULT_READER_LIST_LENGTH 16
+
 /*
  * Automagically allocate a MifareTag given a device and target info.
  */
@@ -259,6 +264,171 @@ freefare_free_tags (MifareTag *tags)
     }
 }
 
+
+static struct freefare_reader_context *_libnfc_context_open(FreefareFlags flags)
+{
+    struct freefare_reader_context *result = calloc(1, sizeof(*result));
+    if(!result) {
+	return NULL;
+    }
+    nfc_init(&(result->context.libnfc));
+    result->flags = flags;
+
+    return result;
+}
+
+static void _libnfc_context_close(struct freefare_reader_context *context)
+{
+    if(!context) {
+	return;
+    }
+    nfc_exit(context->context.libnfc);
+    free(context);
+}
+
+static void _libnfc_device_close(struct freefare_reader_device *device)
+{
+    if(!device) {
+	return;
+    }
+    nfc_close(device->device.libnfc);
+    free(device);
+}
+
+static int _embiggen_array(void ***array, size_t *array_length, size_t element_size, size_t min_elements)
+{
+    if(!array || !array_length) {
+	return -1;
+    }
+
+    if(*array && *array_length >= min_elements) {
+	return 0;
+    }
+
+    void *new_array = calloc(min_elements, element_size);
+    if(!new_array) {
+	return -1;
+    }
+
+    memcpy(new_array, *array, element_size * min_elements);
+    *array = new_array;
+    *array_length = min_elements;
+    return 0;
+}
+
+static int _reader_context_store(struct freefare_context *ctx, struct freefare_reader_context *reader_context)
+{
+    if(!ctx) {
+	return -1;
+    }
+
+    /*
+     * Ensure the array is allocated
+     */
+    if(_embiggen_array((void***)&ctx->reader_contexts, &ctx->reader_contexts_length, sizeof(ctx->reader_contexts[0]), DEFAULT_READER_LIST_LENGTH) < 0) {
+	return -1;
+    }
+
+    /*
+     * Search through the array for the first free slot and use it
+     */
+    for(size_t i=0; i<ctx->reader_contexts_length; i++) {
+	if(ctx->reader_contexts[i] == NULL) {
+	    ctx->reader_contexts[i] = reader_context;
+	    return i;
+	}
+    }
+
+    /*
+     * No slot found, enlarge the array and use the next one
+     */
+    int slot = ctx->reader_contexts_length;
+    if(_embiggen_array((void***)&ctx->reader_contexts, &ctx->reader_contexts_length, sizeof(ctx->reader_contexts[0]), slot+1) < 0) {
+	return -1;
+    } else {
+	ctx->reader_contexts[slot] = reader_context;
+	return slot;
+    }
+
+    return -1;
+}
+
+/*
+ * Allocate a new library context, possibly initialize lower-level
+ * reader library connections
+ */
+FreefareContext	 freefare_init (FreefareFlags flags)
+{
+    struct freefare_context *result = calloc(1, sizeof(*result));
+    if(!result) {
+	return NULL;
+    }
+
+    result->global_flags = flags;
+    if(result->global_flags & FREEFARE_FLAG_READER_ALL) {
+	result->global_flags &= ~FREEFARE_FLAG_READER_ALL;
+	result->global_flags |= FREEFARE_FLAG_MASK_READER_ALL;
+    }
+
+    if(result->global_flags & FREEFARE_FLAG_READER_LIBNFC) {
+	/*
+	 * Initialize an internal libnfc connection
+	 */
+	struct freefare_reader_context *libnfc_context = _libnfc_context_open(
+		FREEFARE_FLAG_READER_LIBNFC | FREEFARE_FLAG_AUTOCLOSE |
+		(result->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT)
+	);
+	if(!libnfc_context) {
+	    goto abort;
+	}
+	libnfc_context->internal = 1;
+	if(_reader_context_store(result, libnfc_context) < 0) {
+	    _libnfc_context_close(libnfc_context);
+	    goto abort;
+	}
+    }
+
+    return result;
+abort:
+    freefare_exit(result);
+    return NULL;
+}
+
+void freefare_exit (FreefareContext ctx)
+{
+    if(!ctx) {
+	return;
+    }
+
+    for(size_t i=0; i<ctx->reader_contexts_length; i++) {
+	if(ctx->reader_contexts[i] && (ctx->reader_contexts[i]->flags & FREEFARE_FLAG_AUTOCLOSE)) {
+	    if(ctx->reader_contexts[i]->flags & FREEFARE_FLAG_READER_LIBNFC) {
+		_libnfc_context_close(ctx->reader_contexts[i]);
+		ctx->reader_contexts[i] = NULL;
+	    }
+	}
+    }
+
+    for(size_t i=0; i<ctx->reader_devices_length; i++) {
+	if(ctx->reader_devices[i] && (ctx->reader_devices[i]->flags & FREEFARE_FLAG_AUTOCLOSE)) {
+	    if(ctx->reader_devices[i]->flags & FREEFARE_FLAG_READER_LIBNFC) {
+		_libnfc_device_close(ctx->reader_devices[i]);
+		ctx->reader_devices[i] = NULL;
+	    }
+	}
+    }
+
+    if(ctx->reader_contexts) {
+	free(ctx->reader_contexts);
+    }
+
+    if(ctx->reader_devices) {
+	free(ctx->reader_devices);
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
+    free(ctx);
+}
 
 /*
  * Low-level API

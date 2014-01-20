@@ -292,6 +292,37 @@ struct mifare_ultralight_tag {
 #define DEBUG_XFER(data, nbytes, hint) do {} while (0)
 #endif
 
+/*
+ * Freefare library context structure
+ */
+struct freefare_context {
+    FreefareFlags global_flags;
+    struct freefare_reader_device {
+	FreefareReaderDevice device;
+	FreefareFlags flags;
+	unsigned int internal:1;
+	int handle;
+    } **reader_devices;
+    size_t reader_devices_length;
+    struct freefare_reader_context {
+	FreefareReaderContext context;
+	FreefareFlags flags;
+	unsigned int internal:1;
+	int handle;
+    } **reader_contexts;
+    size_t reader_contexts_length;
+    struct {
+	enum {
+	    FREEFARE_ENUMERATION_PHASE_NONE,
+	    FREEFARE_ENUMERATION_PHASE_EXT_DEVICE,
+	    FREEFARE_ENUMERATION_PHASE_EXT_CONTEXT,
+	    FREEFARE_ENUMERATION_PHASE_INT,
+	} phase;
+	int device_handle, context_handle, context_device_index;
+    } enumeration_state;
+};
+
+
 
 /*
  * Buffer management macros.

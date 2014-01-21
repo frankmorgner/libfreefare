@@ -45,6 +45,7 @@ struct supported_tag supported_tags[] = {
 
 static FreefareContext implicit_context = NULL;
 
+static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
 static MifareTag *_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
 static int _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
 static void _reader_device_close(struct freefare_reader_device *device);
@@ -67,15 +68,51 @@ MifareTag
 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai)
 {
     FreefareContext ctx = freefare_implicit_context();
-    return freefare_tag_new_ex(ctx, (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT) | FREEFARE_FLAG_READER_LIBNFC, FREEFARE_TAG_LIBNFC(device, nai));
+    return freefare_tag_new_ex(ctx, (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT) | FREEFARE_FLAG_READER_LIBNFC, FREEFARE_TAG_LIBNFC(device, nai), NO_TAG_TYPE);
 }
 
 /*
- * Automagically allocate a MifareTag given a device and target info.
+ * Automagically allocate a MifareTag given a reader driver specific information.
+ * Will try to use the tag as given by tag_type, or reject it otherwise
  */
 MifareTag
-freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag reader_tag)
+freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag reader_tag, enum mifare_tag_type tag_type)
 {
+    if(!ctx) {
+	return NULL;
+    }
+
+    if(flags & FREEFARE_FLAG_READER_LIBNFC) {
+	struct freefare_reader_device *reader_device = calloc(1, sizeof(*reader_device));
+	if(!reader_device) {
+	    return NULL;
+	}
+
+	reader_device->flags = FREEFARE_FLAG_READER_LIBNFC | (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT);
+	reader_device->internal = 1;
+	reader_device->device = FREEFARE_DEVICE_LIBNFC(reader_tag.libnfc.device);
+	int slot = _reader_device_store(ctx, reader_device);
+	if(slot < 0) {
+	    free(reader_device);
+	    return NULL;
+	}
+
+	MifareTag result = _freefare_tag_new_libnfc(ctx, flags, reader_device, reader_tag.libnfc.nai, tag_type);
+	_reader_device_down(ctx, slot);
+	return result;
+    }
+
+    return NULL;
+}
+
+static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+{
+    /*
+     * TODO Implement
+     */
+    return NULL;
+}
+#if 0
     bool found = false;
     struct supported_tag *tag_info;
     MifareTag tag;
@@ -144,6 +181,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 
     return tag;
 }
+#endif
 
 
 /*
@@ -196,61 +234,6 @@ freefare_get_tags (nfc_device *device)
     return tags;
 }
 
-#if 0
-/*
- * TODO: Implement this in the tag_first/tag_next API in the libnfc case
- * For now it's just disabled.
- */
-
-{
-    MifareTag *tags = NULL;
-    int tag_count = 0;
-
-    nfc_initiator_init(device);
-
-    // Drop the field for a while
-    nfc_device_set_property_bool(device,NP_ACTIVATE_FIELD,false);
-
-    // Configure the CRC and Parity settings
-    nfc_device_set_property_bool(device,NP_HANDLE_CRC,true);
-    nfc_device_set_property_bool(device,NP_HANDLE_PARITY,true);
-    nfc_device_set_property_bool(device,NP_AUTO_ISO14443_4,true);
-
-    // Enable field so more power consuming cards can power themselves up
-    nfc_device_set_property_bool(device,NP_ACTIVATE_FIELD,true);
-
-    // Poll for a ISO14443A (MIFARE) tag
-    nfc_target candidates[MAX_CANDIDATES];
-    int candidates_count;
-    nfc_modulation modulation = {
-	.nmt = NMT_ISO14443A,
-	.nbr = NBR_106
-    };
-    if ((candidates_count = nfc_initiator_list_passive_targets(device, modulation, candidates, MAX_CANDIDATES)) < 0)
-	return NULL;
-
-    tags = malloc(sizeof (void *));
-    if(!tags) return NULL;
-    tags[0] = NULL;
-
-    for (int c = 0; c < candidates_count; c++) {
-	MifareTag t;
-	if ((t = freefare_tag_new(device, candidates[c].nti.nai))) {
-	    /* (Re)Allocate memory for the found MIFARE targets array */
-	    MifareTag *p = realloc (tags, (tag_count + 2) * sizeof (MifareTag));
-	    if (p)
-		tags = p;
-	    else
-		return tags; // FAIL! Return what has been found so far.
-	    tags[tag_count++] = t;
-	    tags[tag_count] = NULL;
-	}
-    }
-
-    return tags;
-}
-#endif
-
 /*
  * Returns the type of the provided tag.
  */
@@ -275,9 +258,9 @@ freefare_get_tag_friendly_name (MifareTag tag)
 char *
 freefare_get_tag_uid (MifareTag tag)
 {
-    char *res = malloc (2 * tag->info.szUidLen + 1);
-    for (size_t i =0; i < tag->info.szUidLen; i++)
-        snprintf (res + 2*i, 3, "%02x", tag->info.abtUid[i]);
+    char *res = malloc (2 * tag->libnfc.info.szUidLen + 1);
+    for (size_t i =0; i < tag->libnfc.info.szUidLen; i++)
+        snprintf (res + 2*i, 3, "%02x", tag->libnfc.info.abtUid[i]);
     return res;
 }
 
@@ -310,8 +293,8 @@ const char *
 freefare_strerror (MifareTag tag)
 {
     const char *p = "Unknown error";
-    if (nfc_device_get_last_error (tag->device) < 0) {
-      p = nfc_strerror (tag->device);
+    if (nfc_device_get_last_error (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) < 0) {
+      p = nfc_strerror (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc);
     } else {
       if (tag->tag_info->type == DESFIRE) {
         if (MIFARE_DESFIRE (tag)->last_pcd_error) {
@@ -462,7 +445,7 @@ static int _libnfc_enumerate_device(FreefareContext ctx, struct freefare_reader_
 	 *
 	 * TODO Check and reject type
 	 */
-	*result = freefare_tag_new(device->device.libnfc, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai);
+	*result = _freefare_tag_new_libnfc(ctx, FREEFARE_FLAG_READER_LIBNFC, device, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
 	state->libnfc.candidate_index++;
 	if(*result) {
 	    return 0;

@@ -90,7 +90,7 @@
 	errno = 0; \
 	DEBUG_XFER (msg, __##msg##_n, "===> "); \
 	int _res; \
-	if ((_res = nfc_initiator_transceive_bytes (tag->device, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
+	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
 	    if (disconnect) { \
 		tag->active = false; \
 	    } \
@@ -235,7 +235,7 @@ mifare_classic_connect (MifareTag tag)
 	.nmt = NMT_ISO14443A,
 	.nbr = NBR_106
     };
-    if (nfc_initiator_select_passive_target (tag->device, modulation, tag->info.abtUid, tag->info.szUidLen, &pnti) >= 0) {
+    if (nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &pnti) >= 0) {
 	tag->active = 1;
     } else {
 	errno = EIO;
@@ -253,7 +253,7 @@ mifare_classic_disconnect (MifareTag tag)
     ASSERT_ACTIVE (tag);
     ASSERT_MIFARE_CLASSIC (tag);
 
-    if (nfc_initiator_deselect_target (tag->device) >= 0) {
+    if (nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) >= 0) {
 	tag->active = 0;
     } else {
 	errno = EIO;
@@ -290,7 +290,7 @@ mifare_classic_authenticate (MifareTag tag, const MifareClassicBlockNumber block
     BUFFER_APPEND(cmd, block);
     BUFFER_APPEND_BYTES (cmd, key, 6);
     // To support both 4-byte & 7-byte UID cards:
-    BUFFER_APPEND_BYTES (cmd, tag->info.abtUid + tag->info.szUidLen - 4, 4);
+    BUFFER_APPEND_BYTES (cmd, tag->libnfc.info.abtUid + tag->libnfc.info.szUidLen - 4, 4);
 
     CLASSIC_TRANSCEIVE_EX (tag, cmd, res, 1);
 

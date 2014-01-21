@@ -185,8 +185,12 @@ struct supported_tag {
  * mifare_*_connect() function.
  */
 struct mifare_tag {
-    nfc_device *device;
-    nfc_iso14443a_info info;
+    FreefareContext ctx;
+    FreefareFlags flags;
+    struct {
+	int reader_device_handle;
+	nfc_iso14443a_info info;
+    } libnfc;
     const struct supported_tag *tag_info;
     int active;
 };

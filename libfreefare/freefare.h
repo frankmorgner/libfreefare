@@ -81,8 +81,10 @@ MifareTag	 freefare_tag_next (FreefareContext ctx);
 MifareTag	*freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type);
 void		 freefare_exit (FreefareContext ctx);
 
-MifareTag	 freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
+MifareTag	 freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag, enum mifare_tag_type tag_type);
+__attribute__((deprecated))
 MifareTag	*freefare_get_tags (nfc_device *device);
+__attribute__((deprecated))
 MifareTag	 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai);
 
 

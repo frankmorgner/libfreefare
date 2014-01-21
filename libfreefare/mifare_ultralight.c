@@ -63,7 +63,7 @@
 	errno = 0; \
 	DEBUG_XFER (msg, __##msg##_n, "===> "); \
 	int _res; \
-	if ((_res = nfc_initiator_transceive_bytes (tag->device, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
+	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
 	    return errno = EIO, -1; \
 	} \
 	__##res##_n = _res; \
@@ -73,19 +73,19 @@
 #define ULTRALIGHT_TRANSCEIVE_RAW(tag, msg, res) \
     do { \
 	errno = 0; \
-	if (nfc_device_set_property_bool (tag->device, NP_EASY_FRAMING, false) < 0) { \
+	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, false) < 0) { \
 	    errno = EIO; \
 	    return -1; \
 	} \
 	DEBUG_XFER (msg, __##msg##_n, "===> "); \
 	int _res; \
-	if ((_res = nfc_initiator_transceive_bytes (tag->device, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
-	    nfc_device_set_property_bool (tag->device, NP_EASY_FRAMING, true); \
+	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
+	    nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, true); \
 	    return errno = EIO, -1; \
 	} \
 	__##res##_n = _res; \
 	DEBUG_XFER (res, __##res##_n, "<=== "); \
-	if (nfc_device_set_property_bool (tag->device, NP_EASY_FRAMING, true) < 0) { \
+	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, true) < 0) { \
 	    errno = EIO; \
 	    return -1; \
 	} \
@@ -138,7 +138,7 @@ mifare_ultralight_connect (MifareTag tag)
 	.nmt = NMT_ISO14443A,
 	.nbr = NBR_106
     };
-    if (nfc_initiator_select_passive_target (tag->device, modulation, tag->info.abtUid, tag->info.szUidLen, &pnti) >= 0) {
+    if (nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &pnti) >= 0) {
 	tag->active = 1;
 	for (int i = 0; i < MIFARE_ULTRALIGHT_MAX_PAGE_COUNT; i++)
 	    MIFARE_ULTRALIGHT(tag)->cached_pages[i] = 0;
@@ -158,7 +158,7 @@ mifare_ultralight_disconnect (MifareTag tag)
     ASSERT_ACTIVE (tag);
     ASSERT_MIFARE_ULTRALIGHT (tag);
 
-    if (nfc_initiator_deselect_target (tag->device) >= 0) {
+    if (nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) >= 0) {
 	tag->active = 0;
     } else {
 	errno = EIO;

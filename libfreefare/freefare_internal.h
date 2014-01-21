@@ -300,25 +300,26 @@ struct freefare_context {
     struct freefare_reader_device {
 	FreefareReaderDevice device;
 	FreefareFlags flags;
-	unsigned int internal:1;
-	int handle;
     } **reader_devices;
     size_t reader_devices_length;
     struct freefare_reader_context {
 	FreefareReaderContext context;
 	FreefareFlags flags;
 	unsigned int internal:1;
-	int handle;
     } **reader_contexts;
     size_t reader_contexts_length;
-    struct {
+    struct freefare_enumeration_state {
 	enum {
-	    FREEFARE_ENUMERATION_PHASE_NONE,
+	    FREEFARE_ENUMERATION_PHASE_NONE = 0,
 	    FREEFARE_ENUMERATION_PHASE_EXT_DEVICE,
 	    FREEFARE_ENUMERATION_PHASE_EXT_CONTEXT,
 	    FREEFARE_ENUMERATION_PHASE_INT,
 	} phase;
 	int device_handle, context_handle, context_device_index;
+	nfc_device *libnfc_device;
+	nfc_connstring *libnfc_connstrings;
+	size_t libnfc_connstrings_length;
+	enum mifare_tag_type tag_type;
     } enumeration_state;
 };
 

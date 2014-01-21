@@ -65,9 +65,11 @@ typedef unsigned char MifareUltralightPage[4];
 
 typedef union { nfc_context *libnfc; } FreefareReaderContext;
 typedef union { nfc_device *libnfc; } FreefareReaderDevice;
+typedef union { struct {nfc_device *device; nfc_iso14443a_info nai;} libnfc; } FreefareReaderTag;
 
 #define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
 #define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
+#define FREEFARE_TAG_LIBNFC(device, nai) (FreefareReaderTag){.libnfc = {device, nai}}
 
 FreefareContext	 freefare_init (FreefareFlags flags);
 int		 freefare_context_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderContext context);
@@ -79,8 +81,10 @@ MifareTag	 freefare_tag_next (FreefareContext ctx);
 MifareTag	*freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type);
 void		 freefare_exit (FreefareContext ctx);
 
+MifareTag	 freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
 MifareTag	*freefare_get_tags (nfc_device *device);
 MifareTag	 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai);
+
 
 enum mifare_tag_type freefare_get_tag_type (MifareTag tag);
 const char	*freefare_get_tag_friendly_name (MifareTag tag);

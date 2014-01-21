@@ -295,11 +295,15 @@ struct mifare_ultralight_tag {
 /*
  * Freefare library context structure
  */
+#define MAX_CANDIDATES 16
+
 struct freefare_context {
     FreefareFlags global_flags;
     struct freefare_reader_device {
 	FreefareReaderDevice device;
 	FreefareFlags flags;
+	unsigned int internal:1;
+	unsigned int references;
     } **reader_devices;
     size_t reader_devices_length;
     struct freefare_reader_context {
@@ -316,9 +320,17 @@ struct freefare_context {
 	    FREEFARE_ENUMERATION_PHASE_INT,
 	} phase;
 	int device_handle, context_handle, context_device_index;
-	nfc_device *libnfc_device;
-	nfc_connstring *libnfc_connstrings;
-	size_t libnfc_connstrings_length;
+	struct freefare_reader_device *tmp_device;
+	int tmp_device_handle;
+	unsigned int single_device:1;
+	struct {
+	    nfc_connstring *connstrings;
+	    size_t connstrings_length;
+	    nfc_device *device;
+	    nfc_target *candidates;
+	    size_t candidates_length;
+	    int candidate_index;
+	} libnfc;
 	enum mifare_tag_type tag_type;
     } enumeration_state;
 };

@@ -45,7 +45,7 @@ struct supported_tag supported_tags[] = {
 
 static FreefareContext implicit_context = NULL;
 
-static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
+static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
 static MifareTag *_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
 static int _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
 static void _reader_device_close(struct freefare_reader_device *device);
@@ -97,7 +97,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	    return NULL;
 	}
 
-	MifareTag result = _freefare_tag_new_libnfc(ctx, flags, reader_device, reader_tag.libnfc.nai, tag_type);
+	MifareTag result = _freefare_tag_new_libnfc(ctx, flags, slot, reader_tag.libnfc.nai, tag_type);
 	_reader_device_down(ctx, slot);
 	return result;
     }
@@ -105,83 +105,103 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
     return NULL;
 }
 
-static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+static MifareTag _freefare_tag_allocate(FreefareContext ctx, FreefareFlags flags, const struct supported_tag *tag_info)
 {
-    /*
-     * TODO Implement
-     */
-    return NULL;
-}
-#if 0
-    bool found = false;
-    struct supported_tag *tag_info;
-    MifareTag tag;
-
-    if(!ctx) {
-	return NULL;
-    }
-    /*
-     * TODO Make this generic for all reader types, and include it into the
-     * library context management, for now just hard code a legacy libnfc path
-     */
-    if(!(flags & FREEFARE_FLAG_READER_LIBNFC)) {
+    if(!ctx || !tag_info) {
 	return NULL;
     }
 
-    nfc_device *device = reader_tag.libnfc.device;
-    nfc_iso14443a_info nai = reader_tag.libnfc.nai;
-
-    /* Ensure the target is supported */
-    for (size_t i = 0; i < sizeof (supported_tags) / sizeof (struct supported_tag); i++) {
-	if (((nai.szUidLen == 4) || (nai.abtUid[0] == NXP_MANUFACTURER_CODE)) &&
-	    (nai.btSak == supported_tags[i].SAK) &&
-	    (!supported_tags[i].ATS_min_length || ((nai.szAtsLen >= supported_tags[i].ATS_min_length) &&
-						   (0 == memcmp (nai.abtAts, supported_tags[i].ATS, supported_tags[i].ATS_compare_length)))) &&
-	    ((supported_tags[i].check_tag_on_reader == NULL) ||
-	     supported_tags[i].check_tag_on_reader(device, nai))) {
-
-	    tag_info = &(supported_tags[i]);
-	    found = true;
-	    break;
-	}
-    }
-
-    if (!found)
-	return NULL;
-
-    /* Allocate memory for the found MIFARE target */
+    MifareTag result = NULL;
     switch (tag_info->type) {
     case NO_TAG_TYPE:
-	tag = NULL;
+	result = NULL;
 	break;
     case CLASSIC_1K:
     case CLASSIC_4K:
-	tag = mifare_classic_tag_new ();
+	result = mifare_classic_tag_new ();
 	break;
     case DESFIRE:
-	tag = mifare_desfire_tag_new ();
+	result = mifare_desfire_tag_new ();
 	break;
     case ULTRALIGHT:
     case ULTRALIGHT_C:
-	tag = mifare_ultralight_tag_new ();
+	result = mifare_ultralight_tag_new ();
 	break;
     }
 
-    if (!tag)
+    if (!result)
 	return NULL;
 
     /*
      * Initialize common fields
-     * (Target specific fields are initialized in mifare_*_tag_new())
+     * (Target specific fields are initialized in mifare_*_tag_new(),
+     *  Reader driver specific fields in _freefare_tag_new_*())
      */
-    tag->device = device;
-    tag->info = nai;
-    tag->active = 0;
-    tag->tag_info = tag_info;
+    result->ctx = ctx;
+    result->active = 0;
+    result->tag_info = tag_info;
+    result->flags = flags;
 
-    return tag;
+    return result;
 }
-#endif
+
+/*
+ * Determine if the tag is compatible with tag_type, if given, or determine
+ * the tag type.
+ * TODO: Currently only determines the tag type. Does not correctly account
+ * for multiple identity tags (e.g. SmartMX with included Classic emulation).
+ */
+static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+{
+    nfc_device *ndev = device->device.libnfc;
+
+    /* Ensure the target is supported */
+    for (size_t i = 0; i < sizeof (supported_tags) / sizeof (struct supported_tag); i++) {
+	if (((info.szUidLen == 4) || (info.abtUid[0] == NXP_MANUFACTURER_CODE)) &&
+	    (info.btSak == supported_tags[i].SAK) &&
+	    (!supported_tags[i].ATS_min_length || ((info.szAtsLen >= supported_tags[i].ATS_min_length) &&
+						   (0 == memcmp (info.abtAts, supported_tags[i].ATS, supported_tags[i].ATS_compare_length)))) &&
+	    ((supported_tags[i].check_tag_on_reader == NULL) ||
+	     supported_tags[i].check_tag_on_reader(ndev, info))) {
+
+	    if(tag_type == NO_TAG_TYPE || supported_tags[i].type == tag_type) {
+		return &(supported_tags[i]);
+	    }
+	}
+    }
+
+    return NULL;
+}
+
+static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+{
+
+    if(!ctx || !ctx->reader_devices[device_handle]) {
+	return NULL;
+    }
+    const struct supported_tag *tag_info = _libnfc_tag_type(ctx, flags, ctx->reader_devices[device_handle], info, tag_type);
+    if(!tag_info) {
+	return NULL;
+    }
+
+    if(tag_type != NO_TAG_TYPE && tag_info->type != tag_type) {
+	return NULL;
+    }
+
+    MifareTag result = _freefare_tag_allocate(ctx, flags, tag_info);
+    if(!result) {
+	return NULL;
+    }
+
+    /*
+     * Initialize libnfc specific fields
+     */
+    result->libnfc.reader_device_handle = device_handle;
+    result->libnfc.info = info;
+    result->ctx->reader_devices[result->libnfc.reader_device_handle]->references++;
+
+    return result;
+}
 
 
 /*
@@ -287,6 +307,9 @@ freefare_free_tag (MifareTag tag)
             break;
         }
     }
+    /*
+     * TODO Implement additions
+     */
 }
 
 const char *
@@ -398,8 +421,12 @@ static void _libnfc_device_close(struct freefare_reader_device *device)
     free(device);
 }
 
-static int _libnfc_enumerate_device(FreefareContext ctx, struct freefare_reader_device *device, struct freefare_enumeration_state *state, MifareTag *result)
+static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
 {
+    if(!ctx || !ctx->reader_devices[device_handle]) {
+	return -1;
+    }
+
     if(!state->libnfc.candidates) {
 	state->libnfc.candidates_length = DEFAULT_READER_LIST_LENGTH;
 	state->libnfc.candidates = calloc(state->libnfc.candidates_length, sizeof(state->libnfc.candidates[0]));
@@ -408,29 +435,29 @@ static int _libnfc_enumerate_device(FreefareContext ctx, struct freefare_reader_
 	    return -1;
 	}
 
-	nfc_initiator_init(device->device.libnfc);
+	nfc_initiator_init(ctx->reader_devices[device_handle]->device.libnfc);
 
 	// Drop the field for a while
-	nfc_device_set_property_bool(device->device.libnfc,NP_ACTIVATE_FIELD,false);
+	nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_ACTIVATE_FIELD,false);
 
 	// Configure the CRC and Parity settings
-	nfc_device_set_property_bool(device->device.libnfc,NP_HANDLE_CRC,true);
-	nfc_device_set_property_bool(device->device.libnfc,NP_HANDLE_PARITY,true);
-	if(device->flags & FREEFARE_FLAG_DISABLE_ISO14443_4) {
-	    nfc_device_set_property_bool(device->device.libnfc,NP_AUTO_ISO14443_4,false);
+	nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_HANDLE_CRC,true);
+	nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_HANDLE_PARITY,true);
+	if(ctx->reader_devices[device_handle]->flags & FREEFARE_FLAG_DISABLE_ISO14443_4) {
+	    nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_AUTO_ISO14443_4,false);
 	} else {
-	    nfc_device_set_property_bool(device->device.libnfc,NP_AUTO_ISO14443_4,true);
+	    nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_AUTO_ISO14443_4,true);
 	}
 
 	// Enable field so more power consuming cards can power themselves up
-	nfc_device_set_property_bool(device->device.libnfc,NP_ACTIVATE_FIELD,true);
+	nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_ACTIVATE_FIELD,true);
 
 	// Poll for a ISO14443A (MIFARE) tag
 	nfc_modulation modulation = {
 		.nmt = NMT_ISO14443A,
 		.nbr = NBR_106
 	};
-	state->libnfc.candidates_length = nfc_initiator_list_passive_targets(device->device.libnfc, modulation, state->libnfc.candidates, state->libnfc.candidates_length);
+	state->libnfc.candidates_length = nfc_initiator_list_passive_targets(ctx->reader_devices[device_handle]->device.libnfc, modulation, state->libnfc.candidates, state->libnfc.candidates_length);
 	if (state->libnfc.candidates_length < 0) {
 	    free(state->libnfc.candidates);
 	    state->libnfc.candidates_length = 0;
@@ -440,12 +467,7 @@ static int _libnfc_enumerate_device(FreefareContext ctx, struct freefare_reader_
     }
 
     while(state->libnfc.candidate_index < state->libnfc.candidates_length) {
-	/*
-	 * TODO This uses the legacy code path, that may lead to some, uh, problems :)
-	 *
-	 * TODO Check and reject type
-	 */
-	*result = _freefare_tag_new_libnfc(ctx, FREEFARE_FLAG_READER_LIBNFC, device, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
+	*result = _freefare_tag_new_libnfc(ctx, FREEFARE_FLAG_READER_LIBNFC, device_handle, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
 	state->libnfc.candidate_index++;
 	if(*result) {
 	    return 0;
@@ -492,38 +514,35 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 		return -1;
 	    }
 	    state->tmp_device->internal = 1;
-	    state->tmp_device_handle = -1;
+	    state->tmp_device_handle = _reader_device_store(ctx, state->tmp_device);
+	    if(state->tmp_device_handle < 0) {
+		_reader_device_close(state->tmp_device);
+		state->tmp_device = NULL;
+		return -1;
+	    }
 	}
 
-	if(_libnfc_enumerate_device(ctx, state->tmp_device, state, result) < 0) {
+	if(_libnfc_enumerate_device(ctx, state->tmp_device_handle, state, result) < 0) {
 	    return -1;
 	}
 
 	if(*result) {
 	    /*
 	     * The reference counter in the tmp_device structure has already been
-	     * incremented. If it has been stored before, just leave it be and return
-	     * successfully, otherwise store it in the reader_devices array in the library
-	     * context (marking it for autoclose and internal)
+	     * incremented.
 	     */
-	    if(state->tmp_device_handle < 0) {
-		state->tmp_device_handle = _reader_device_store(ctx, state->tmp_device);
-	    }
-	    if(state->tmp_device_handle >= 0) {
-		return 0;
-	    } else {
-		_reader_device_close(state->tmp_device);
-		state->tmp_device = NULL;
-		return -1;
-	    }
+	    return 0;
 
 	}
 
 	/*
 	 * This is a no-op if the device is referenced by a tag, otherwise it
 	 * will close and free the device structure.
+	 * Note: We need to decrement it twice: Once for the *_open(), once for the *_store().
+	 * FIXME This seems wrong
 	 */
-	_reader_device_close(state->tmp_device);
+	_reader_device_down(ctx, state->tmp_device_handle);
+	_reader_device_down(ctx, state->tmp_device_handle);
 	state->tmp_device = NULL;
 	state->context_device_index++;
     }
@@ -638,7 +657,7 @@ static void _reader_device_down(struct freefare_context *ctx, int slot)
 	_reader_device_close(ctx->reader_devices[slot]);
 	ctx->reader_devices[slot] = NULL;
     } else {
-	ctx->reader_devices[slot]--;
+	ctx->reader_devices[slot]->references--;
     }
 }
 
@@ -712,7 +731,7 @@ MifareTag _freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_s
 	    }
 
 	    if( ctx->reader_devices[state->device_handle]->flags & FREEFARE_FLAG_READER_LIBNFC ) {
-		_libnfc_enumerate_device(ctx, ctx->reader_devices[state->device_handle], state, &result);
+		_libnfc_enumerate_device(ctx, state->device_handle, state, &result);
 	    }
 
 	    if(result) {

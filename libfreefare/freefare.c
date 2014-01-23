@@ -45,12 +45,14 @@ struct supported_tag supported_tags[] = {
 
 static FreefareContext implicit_context = NULL;
 
-static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
-static MifareTag *_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
-static int _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
+static MifareTag	 _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
+static void 		 _freefare_tag_free_reader(MifareTag tag);
 
-static void _reader_context_free(struct freefare_reader_context **conptr);
-static void _reader_device_free(struct freefare_reader_device **devptr);
+static MifareTag 	*_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
+
+static void 		 _reader_context_free(struct freefare_reader_context **conptr);
+static int 		 _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
+static void 		 _reader_device_free(struct freefare_reader_device **devptr);
 
 static FreefareContext freefare_implicit_context(void)
 {
@@ -208,6 +210,28 @@ static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags fla
     return result;
 }
 
+static void _freefare_tag_free_libnfc(MifareTag tag)
+{
+    if(!tag || !tag->ctx) {
+	return;
+    }
+
+    /*
+     * Decrement reference count on the reader_device
+     */
+    _reader_device_free(tag->ctx->reader_devices + tag->libnfc.reader_device_handle);
+}
+
+static void _freefare_tag_free_reader(MifareTag tag)
+{
+    if(!tag) {
+	return;
+    }
+    if(tag->flags & FREEFARE_FLAG_READER_LIBNFC) {
+	_freefare_tag_free_libnfc(tag);
+    }
+}
+
 
 /*
  * MIFARE card common functions
@@ -295,6 +319,18 @@ freefare_get_tag_uid (MifareTag tag)
 void
 freefare_free_tag (MifareTag tag)
 {
+    if(!tag) {
+	return;
+    }
+
+    /*
+     * Free any reader specific data
+     */
+    _freefare_tag_free_reader(tag);
+
+    /*
+     * Free the tag specific and tag data
+     */
     if (tag) {
         switch (tag->tag_info->type) {
         case NO_TAG_TYPE:
@@ -312,9 +348,6 @@ freefare_free_tag (MifareTag tag)
             break;
         }
     }
-    /*
-     * TODO Implement additions
-     */
 }
 
 const char *
@@ -882,6 +915,7 @@ static void _reader_device_free(struct freefare_reader_device **devptr)
 	return;
     }
 
+    (*devptr)->references--;
     if((*devptr)->flags & FREEFARE_FLAG_READER_LIBNFC) {
 	_libnfc_device_free(*devptr);
 	*devptr = NULL;

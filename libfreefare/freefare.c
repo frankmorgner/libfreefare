@@ -48,8 +48,9 @@ static FreefareContext implicit_context = NULL;
 static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
 static MifareTag *_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
 static int _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
-static void _reader_device_close(struct freefare_reader_device *device);
-static void _reader_device_down(struct freefare_context *ctx, int slot);
+
+static void _reader_context_free(struct freefare_reader_context **conptr);
+static void _reader_device_free(struct freefare_reader_device **devptr);
 
 static FreefareContext freefare_implicit_context(void)
 {
@@ -93,12 +94,12 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	reader_device->device = FREEFARE_DEVICE_LIBNFC(reader_tag.libnfc.device);
 	int slot = _reader_device_store(ctx, reader_device);
 	if(slot < 0) {
-	    free(reader_device);
+	    _reader_device_free(&reader_device);
 	    return NULL;
 	}
 
 	MifareTag result = _freefare_tag_new_libnfc(ctx, flags, slot, reader_tag.libnfc.nai, tag_type);
-	_reader_device_down(ctx, slot);
+	_reader_device_free(ctx->reader_devices + slot);
 	return result;
     }
 
@@ -198,6 +199,10 @@ static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags fla
      */
     result->libnfc.reader_device_handle = device_handle;
     result->libnfc.info = info;
+
+    /*
+     * Increment reference count on the reader_device
+     */
     result->ctx->reader_devices[result->libnfc.reader_device_handle]->references++;
 
     return result;
@@ -239,7 +244,7 @@ freefare_get_tags (nfc_device *device)
 
     int slot = _reader_device_store(ctx, reader_device);
     if(slot < 0) {
-	free(reader_device);
+	_reader_device_free(&reader_device);
 	return NULL;
     }
 
@@ -249,7 +254,7 @@ freefare_get_tags (nfc_device *device)
 
     MifareTag *tags = _freefare_tags_get(ctx, NO_TAG_TYPE, &state);
 
-    _reader_device_down(ctx, slot);
+    _reader_device_free(ctx->reader_devices + slot);
 
     return tags;
 }
@@ -410,7 +415,7 @@ static struct freefare_reader_device *_libnfc_device_open(struct freefare_reader
     return result;
 }
 
-static void _libnfc_device_close(struct freefare_reader_device *device)
+static void _libnfc_device_free(struct freefare_reader_device *device)
 {
     if(!device) {
 	return;
@@ -516,8 +521,7 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 	    state->tmp_device->internal = 1;
 	    state->tmp_device_handle = _reader_device_store(ctx, state->tmp_device);
 	    if(state->tmp_device_handle < 0) {
-		_reader_device_close(state->tmp_device);
-		state->tmp_device = NULL;
+		_reader_device_free(&state->tmp_device);
 		return -1;
 	    }
 	}
@@ -538,12 +542,8 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 	/*
 	 * This is a no-op if the device is referenced by a tag, otherwise it
 	 * will close and free the device structure.
-	 * Note: We need to decrement it twice: Once for the *_open(), once for the *_store().
-	 * FIXME This seems wrong
 	 */
-	_reader_device_down(ctx, state->tmp_device_handle);
-	_reader_device_down(ctx, state->tmp_device_handle);
-	state->tmp_device = NULL;
+	_reader_device_free(&state->tmp_device);
 	state->context_device_index++;
     }
 
@@ -632,33 +632,7 @@ static int _reader_device_store(struct freefare_context *ctx, struct freefare_re
 	return -1;
     }
 
-    reader_device->references++;
     return _array_store((void***)&ctx->reader_devices, &ctx->reader_devices_length, sizeof(ctx->reader_devices[0]), reader_device);
-}
-
-static void _reader_device_close(struct freefare_reader_device *device)
-{
-    if(!device) {
-	return;
-    }
-    if(device->references > 1) {
-	return;
-    }
-    if(device->flags & FREEFARE_FLAG_READER_LIBNFC) {
-	_libnfc_device_close(device);
-    }
-}
-static void _reader_device_down(struct freefare_context *ctx, int slot)
-{
-    if(!ctx || slot < 0 || slot >= ctx->reader_devices_length) {
-	return;
-    }
-    if(ctx->reader_devices[slot]->references <= 1) {
-	_reader_device_close(ctx->reader_devices[slot]);
-	ctx->reader_devices[slot] = NULL;
-    } else {
-	ctx->reader_devices[slot]->references--;
-    }
 }
 
 /*
@@ -885,6 +859,35 @@ MifareTag *freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type
     return _freefare_tags_get(ctx, tag_type, &state);
 }
 
+static void _reader_context_free(struct freefare_reader_context **conptr)
+{
+    if(!conptr || !*conptr) {
+	return;
+    }
+
+    if((*conptr)->flags & FREEFARE_FLAG_READER_LIBNFC) {
+	_libnfc_context_free(*conptr);
+	*conptr = NULL;
+    }
+}
+
+static void _reader_device_free(struct freefare_reader_device **devptr)
+{
+    if(!devptr || !*devptr) {
+	return;
+    }
+
+    if((*devptr)->references > 1) {
+	(*devptr)->references--;
+	return;
+    }
+
+    if((*devptr)->flags & FREEFARE_FLAG_READER_LIBNFC) {
+	_libnfc_device_free(*devptr);
+	*devptr = NULL;
+    }
+}
+
 void freefare_exit (FreefareContext ctx)
 {
     if(!ctx) {
@@ -895,21 +898,11 @@ void freefare_exit (FreefareContext ctx)
     }
 
     for(size_t i=0; i<ctx->reader_contexts_length; i++) {
-	if(ctx->reader_contexts[i] && (ctx->reader_contexts[i]->flags & FREEFARE_FLAG_AUTOCLOSE)) {
-	    if(ctx->reader_contexts[i]->flags & FREEFARE_FLAG_READER_LIBNFC) {
-		_libnfc_context_free(ctx->reader_contexts[i]);
-		ctx->reader_contexts[i] = NULL;
-	    }
-	}
+	_reader_context_free(ctx->reader_contexts + i);
     }
 
     for(size_t i=0; i<ctx->reader_devices_length; i++) {
-	if(ctx->reader_devices[i] && (ctx->reader_devices[i]->flags & FREEFARE_FLAG_AUTOCLOSE)) {
-	    if(ctx->reader_devices[i]->flags & FREEFARE_FLAG_READER_LIBNFC) {
-		_libnfc_device_close(ctx->reader_devices[i]);
-		ctx->reader_devices[i] = NULL;
-	    }
-	}
+	_reader_device_free(ctx->reader_devices + i);
     }
 
     if(ctx->reader_contexts) {
@@ -922,6 +915,10 @@ void freefare_exit (FreefareContext ctx)
 
     memset(ctx, 0, sizeof(*ctx));
     free(ctx);
+
+    if(ctx == implicit_context) {
+	implicit_context = NULL;
+    }
 }
 
 /*

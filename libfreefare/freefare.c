@@ -26,7 +26,7 @@
 
 #define NXP_MANUFACTURER_CODE 0x04
 
-struct supported_tag supported_tags[] = {
+static struct supported_tag supported_tags[] = {
     { CLASSIC_1K,   "Mifare Classic 1k",            0x08, 0, 0, { 0x00 }, NULL },
     { CLASSIC_1K,   "Mifare Classic 1k (Emulated)", 0x28, 0, 0, { 0x00 }, NULL },
     { CLASSIC_1K,   "Mifare Classic 1k (Emulated)", 0x68, 0, 0, { 0x00 }, NULL },
@@ -38,6 +38,12 @@ struct supported_tag supported_tags[] = {
     { ULTRALIGHT,   "Mifare UltraLight",            0x00, 0, 0, { 0x00 }, NULL },
 };
 
+struct supported_reader {
+    FreefareFlags identifying_flag;
+    void(*tag_free)(MifareTag tag);
+    char*(*get_uid)(MifareTag tag);
+};
+
 #define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC)
 #define FREEFARE_FLAG_MASK_GLOBAL_INHERIT (FREEFARE_FLAG_DISABLE_ISO14443_4)
 
@@ -45,14 +51,14 @@ struct supported_tag supported_tags[] = {
 
 static FreefareContext implicit_context = NULL;
 
-static MifareTag	 _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
-static void 		 _freefare_tag_free_reader(MifareTag tag);
-
 static MifareTag 	*_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
+
+static MifareTag	 _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
 
 static void 		 _reader_context_free(struct freefare_reader_context **conptr);
 static int 		 _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
 static void 		 _reader_device_free(struct freefare_reader_device **devptr);
+static const struct supported_reader *_reader_driver_lookup(FreefareFlags identifying_flag);
 
 static FreefareContext freefare_implicit_context(void)
 {
@@ -100,7 +106,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	    return NULL;
 	}
 
-	MifareTag result = _freefare_tag_new_libnfc(ctx, flags, slot, reader_tag.libnfc.nai, tag_type);
+	MifareTag result = _libnfc_tag_new(ctx, flags, slot, reader_tag.libnfc.nai, tag_type);
 	_reader_device_free(ctx->reader_devices + slot);
 	return result;
     }
@@ -176,12 +182,18 @@ static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, Freefar
     return NULL;
 }
 
-static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
 {
 
     if(!ctx || !ctx->reader_devices[device_handle]) {
 	return NULL;
     }
+
+    const struct supported_reader *reader_fns = _reader_driver_lookup(FREEFARE_FLAG_READER_LIBNFC);
+    if(!reader_fns) {
+	return NULL;
+    }
+
     const struct supported_tag *tag_info = _libnfc_tag_type(ctx, flags, ctx->reader_devices[device_handle], info, tag_type);
     if(!tag_info) {
 	return NULL;
@@ -201,6 +213,7 @@ static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags fla
      */
     result->libnfc.reader_device_handle = device_handle;
     result->libnfc.info = info;
+    result->reader = reader_fns;
 
     /*
      * Increment reference count on the reader_device
@@ -210,7 +223,7 @@ static MifareTag _freefare_tag_new_libnfc(FreefareContext ctx, FreefareFlags fla
     return result;
 }
 
-static void _freefare_tag_free_libnfc(MifareTag tag)
+static void _libnfc_tag_free(MifareTag tag)
 {
     if(!tag || !tag->ctx) {
 	return;
@@ -222,15 +235,6 @@ static void _freefare_tag_free_libnfc(MifareTag tag)
     _reader_device_free(tag->ctx->reader_devices + tag->libnfc.reader_device_handle);
 }
 
-static void _freefare_tag_free_reader(MifareTag tag)
-{
-    if(!tag) {
-	return;
-    }
-    if(tag->flags & FREEFARE_FLAG_READER_LIBNFC) {
-	_freefare_tag_free_libnfc(tag);
-    }
-}
 
 
 /*
@@ -307,6 +311,18 @@ freefare_get_tag_friendly_name (MifareTag tag)
 char *
 freefare_get_tag_uid (MifareTag tag)
 {
+    if(!tag || !tag->reader) {
+	return NULL;
+    }
+    return tag->reader->get_uid(tag);
+}
+
+static char *
+_libnfc_get_tag_uid(MifareTag tag)
+{
+    if(!tag) {
+	return NULL;
+    }
     char *res = malloc (2 * tag->libnfc.info.szUidLen + 1);
     for (size_t i =0; i < tag->libnfc.info.szUidLen; i++)
         snprintf (res + 2*i, 3, "%02x", tag->libnfc.info.abtUid[i]);
@@ -326,7 +342,7 @@ freefare_free_tag (MifareTag tag)
     /*
      * Free any reader specific data
      */
-    _freefare_tag_free_reader(tag);
+    tag->reader->tag_free(tag);
 
     /*
      * Free the tag specific and tag data
@@ -505,7 +521,7 @@ static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, stru
     }
 
     while(state->libnfc.candidate_index < state->libnfc.candidates_length) {
-	*result = _freefare_tag_new_libnfc(ctx, FREEFARE_FLAG_READER_LIBNFC, device_handle, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
+	*result = _libnfc_tag_new(ctx, FREEFARE_FLAG_READER_LIBNFC, device_handle, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
 	state->libnfc.candidate_index++;
 	if(*result) {
 	    return 0;
@@ -576,7 +592,7 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 	 * This is a no-op if the device is referenced by a tag, otherwise it
 	 * will close and free the device structure.
 	 */
-	_reader_device_free(&state->tmp_device);
+	_reader_device_free(ctx->reader_devices + state->tmp_device_handle);
 	state->context_device_index++;
     }
 
@@ -967,4 +983,21 @@ memdup (const void *p, const size_t n)
 	memcpy (res, p, n);
     }
     return res;
+}
+
+/*
+ * Link table to the reader driver specific functions
+ */
+const static struct supported_reader SUPPORTED_READERS[] = {
+	{FREEFARE_FLAG_READER_LIBNFC, _libnfc_tag_free, _libnfc_get_tag_uid},
+};
+
+static const struct supported_reader *_reader_driver_lookup(FreefareFlags identifying_flag)
+{
+    for(size_t i=0; i<sizeof(SUPPORTED_READERS)/sizeof(SUPPORTED_READERS[0]); i++) {
+	if( (SUPPORTED_READERS[i].identifying_flag & identifying_flag) == identifying_flag) {
+	    return SUPPORTED_READERS + i;
+	}
+    }
+    return NULL;
 }

@@ -192,6 +192,7 @@ struct mifare_tag {
 	nfc_iso14443a_info info;
     } libnfc;
     const struct supported_tag *tag_info;
+    const struct supported_reader *reader;
     int active;
 };
 

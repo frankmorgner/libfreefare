@@ -42,6 +42,7 @@ struct supported_reader {
     FreefareFlags identifying_flag;
     void(*tag_free)(MifareTag tag);
     char*(*get_uid)(MifareTag tag);
+    const char*(*strerror)(MifareTag tag);
 };
 
 #define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC)
@@ -367,20 +368,43 @@ freefare_free_tag (MifareTag tag)
 }
 
 const char *
+_libnfc_strerror(MifareTag tag)
+{
+    if(!tag) {
+	return NULL;
+    }
+
+    if (nfc_device_get_last_error (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) < 0) {
+	return nfc_strerror (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc);
+    }
+
+    return NULL;
+}
+
+const char *
 freefare_strerror (MifareTag tag)
 {
-    const char *p = "Unknown error";
-    if (nfc_device_get_last_error (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) < 0) {
-      p = nfc_strerror (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc);
-    } else {
-      if (tag->tag_info->type == DESFIRE) {
-        if (MIFARE_DESFIRE (tag)->last_pcd_error) {
-          p = mifare_desfire_error_lookup (MIFARE_DESFIRE (tag)->last_pcd_error);
-        } else if (MIFARE_DESFIRE (tag)->last_picc_error) {
-          p = mifare_desfire_error_lookup (MIFARE_DESFIRE (tag)->last_picc_error);
-        }
-      }
+    if(!tag || !tag->reader) {
+	return NULL;
     }
+
+
+    const char *p = tag->reader->strerror(tag);
+
+    if(p) {
+	return p;
+    }
+
+    p = "Unknown error";
+
+    if (tag->tag_info->type == DESFIRE) {
+	if (MIFARE_DESFIRE (tag)->last_pcd_error) {
+	    p = mifare_desfire_error_lookup (MIFARE_DESFIRE (tag)->last_pcd_error);
+	} else if (MIFARE_DESFIRE (tag)->last_picc_error) {
+	    p = mifare_desfire_error_lookup (MIFARE_DESFIRE (tag)->last_picc_error);
+	}
+    }
+
     return p;
 }
 
@@ -989,7 +1013,7 @@ memdup (const void *p, const size_t n)
  * Link table to the reader driver specific functions
  */
 const static struct supported_reader SUPPORTED_READERS[] = {
-	{FREEFARE_FLAG_READER_LIBNFC, _libnfc_tag_free, _libnfc_get_tag_uid},
+	{FREEFARE_FLAG_READER_LIBNFC, _libnfc_tag_free, _libnfc_get_tag_uid, _libnfc_strerror},
 };
 
 static const struct supported_reader *_reader_driver_lookup(FreefareFlags identifying_flag)

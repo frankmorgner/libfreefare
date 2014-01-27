@@ -191,6 +191,7 @@ struct mifare_tag {
 	int reader_device_handle;
 	nfc_iso14443a_info info;
 	nfc_modulation modulation;
+	nfc_target pnti;
     } libnfc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;
@@ -267,14 +268,14 @@ struct mifare_ultralight_tag {
  * This macros provide a simple and unified way to perform various tests at the
  * beginning of the different targets functions.
  */
-#define ASSERT_ACTIVE(tag) do { if (!tag->active) return errno = ENXIO, -1; } while (0)
-#define ASSERT_INACTIVE(tag) do { if (tag->active) return errno = ENXIO, -1; } while (0)
+#define ASSERT_ACTIVE(tag) do { if(!tag) return errno = EBADF, -1; if (!tag->active) return errno = ENXIO, -1; } while (0)
+#define ASSERT_INACTIVE(tag) do { if(!tag) return errno = EBADF, -1; if (tag->active) return errno = ENXIO, -1; } while (0)
 
-#define ASSERT_MIFARE_CLASSIC(tag) do { if ((tag->tag_info->type != CLASSIC_1K) && (tag->tag_info->type != CLASSIC_4K)) return errno = ENODEV, -1; } while (0)
-#define ASSERT_MIFARE_DESFIRE(tag) do { if (tag->tag_info->type != DESFIRE) return errno = ENODEV, -1; } while (0)
+#define ASSERT_MIFARE_CLASSIC(tag) do { if(!tag) return errno = EBADF, -1; if ((tag->tag_info->type != CLASSIC_1K) && (tag->tag_info->type != CLASSIC_4K)) return errno = ENODEV, -1; } while (0)
+#define ASSERT_MIFARE_DESFIRE(tag) do { if(!tag) return errno = EBADF, -1; if (tag->tag_info->type != DESFIRE) return errno = ENODEV, -1; } while (0)
 #define IS_MIFARE_ULTRALIGHT_C(tag) (tag->tag_info->type == ULTRALIGHT_C)
-#define ASSERT_MIFARE_ULTRALIGHT(tag) do { if ((tag->tag_info->type != ULTRALIGHT) && (! IS_MIFARE_ULTRALIGHT_C(tag))) return errno = ENODEV, -1; } while (0)
-#define ASSERT_MIFARE_ULTRALIGHT_C(tag) do { if (! IS_MIFARE_ULTRALIGHT_C(tag)) return errno = ENODEV, -1; } while (0)
+#define ASSERT_MIFARE_ULTRALIGHT(tag) do { if(!tag) return errno = EBADF, -1; if ((tag->tag_info->type != ULTRALIGHT) && (! IS_MIFARE_ULTRALIGHT_C(tag))) return errno = ENODEV, -1; } while (0)
+#define ASSERT_MIFARE_ULTRALIGHT_C(tag) do { if(!tag) return errno = EBADF, -1; if (! IS_MIFARE_ULTRALIGHT_C(tag)) return errno = ENODEV, -1; } while (0)
 
 /* 
  * MifareTag cast macros 

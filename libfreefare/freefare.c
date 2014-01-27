@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include <freefare.h>
 
@@ -43,6 +44,9 @@ struct supported_reader {
     void(*tag_free)(MifareTag tag);
     char*(*get_uid)(MifareTag tag);
     const char*(*strerror)(MifareTag tag);
+    int(*connect)(MifareTag tag);
+    int(*disconnect)(MifareTag tag);
+    int(*transceive_bytes)(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
 };
 
 #define DEFAULT_READER_LIST_LENGTH 16
@@ -236,6 +240,22 @@ static void _libnfc_tag_free(MifareTag tag)
     _reader_device_free(tag->ctx->reader_devices + tag->libnfc.reader_device_handle);
 }
 
+static int _libnfc_connect(MifareTag tag)
+{
+    if(!tag) return errno = EBADF, -1;
+    return nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, tag->libnfc.modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &tag->libnfc.pnti);
+}
+
+static int _libnfc_disconnect(MifareTag tag)
+{
+    if(!tag) return errno = EBADF, -1;
+    return nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc);
+}
+
+static int _libnfc_transceive_bytes(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
+{
+    return nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, send, send_length, recv, recv_length, timeout);
+}
 
 
 /*
@@ -1010,7 +1030,7 @@ memdup (const void *p, const size_t n)
  * Link table to the reader driver specific functions
  */
 const static struct supported_reader SUPPORTED_READERS[] = {
-	{FREEFARE_FLAG_READER_LIBNFC, _libnfc_tag_free, _libnfc_get_tag_uid, _libnfc_strerror},
+	{FREEFARE_FLAG_READER_LIBNFC, _libnfc_tag_free, _libnfc_get_tag_uid, _libnfc_strerror, _libnfc_connect, _libnfc_disconnect},
 };
 
 static const struct supported_reader *_reader_driver_lookup(FreefareFlags identifying_flag)

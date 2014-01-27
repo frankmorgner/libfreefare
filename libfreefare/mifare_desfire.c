@@ -184,7 +184,7 @@ static ssize_t	 read_data (MifareTag tag, uint8_t command, uint8_t file_no, off_
 	MIFARE_DESFIRE (tag)->last_pcd_error = OPERATION_OK; \
 	DEBUG_XFER (__msg, __len, "===> "); \
 	int _res; \
-	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, __msg, __len, __res, __##res##_size + 1, 0)) < 0) { \
+	if ((_res = tag->reader->transceive_bytes(tag, __msg, __len, __res, __##res##_size + 1, 0)) < 0) { \
 	    return errno = EIO, -1; \
 	} \
 	__##res##_n = _res; \
@@ -289,11 +289,12 @@ mifare_desfire_connect (MifareTag tag)
     ASSERT_INACTIVE (tag);
     ASSERT_MIFARE_DESFIRE (tag);
 
-    nfc_target pnti;
-    if (nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, tag->libnfc.modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &pnti) >= 0) {
+    if (tag->reader->connect(tag)) {
 	tag->active = 1;
-	free (MIFARE_DESFIRE (tag)->session_key);
-	MIFARE_DESFIRE (tag)->session_key = NULL;
+	if(MIFARE_DESFIRE (tag)->session_key) {
+	    free (MIFARE_DESFIRE (tag)->session_key);
+	    MIFARE_DESFIRE (tag)->session_key = NULL;
+	}
 	MIFARE_DESFIRE (tag)->last_picc_error = OPERATION_OK;
 	MIFARE_DESFIRE (tag)->last_pcd_error = OPERATION_OK;
 	MIFARE_DESFIRE (tag)->authenticated_key_no = NOT_YET_AUTHENTICATED;
@@ -314,10 +315,12 @@ mifare_desfire_disconnect (MifareTag tag)
     ASSERT_ACTIVE (tag);
     ASSERT_MIFARE_DESFIRE (tag);
 
-    free (MIFARE_DESFIRE (tag)->session_key);
-    MIFARE_DESFIRE(tag)->session_key = NULL;
+    if(MIFARE_DESFIRE (tag)->session_key) {
+	free (MIFARE_DESFIRE (tag)->session_key);
+	MIFARE_DESFIRE(tag)->session_key = NULL;
+    }
 
-    if (nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc) >= 0) {
+    if (tag->reader->disconnect(tag)) {
 	tag->active = 0;
     }
     return 0;

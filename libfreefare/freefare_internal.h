@@ -190,6 +190,7 @@ struct mifare_tag {
     struct {
 	int reader_device_handle;
 	nfc_iso14443a_info info;
+	nfc_modulation modulation;
     } libnfc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;
@@ -332,6 +333,7 @@ struct freefare_context {
 	    nfc_connstring *connstrings;
 	    size_t connstrings_length;
 	    nfc_device *device;
+	    nfc_modulation modulation;
 	    nfc_target *candidates;
 	    size_t candidates_length;
 	    int candidate_index;

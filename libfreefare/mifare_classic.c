@@ -231,11 +231,7 @@ mifare_classic_connect (MifareTag tag)
     ASSERT_MIFARE_CLASSIC (tag);
 
     nfc_target pnti;
-    nfc_modulation modulation = {
-	.nmt = NMT_ISO14443A,
-	.nbr = NBR_106
-    };
-    if (nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &pnti) >= 0) {
+    if (nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, tag->libnfc.modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &pnti) >= 0) {
 	tag->active = 1;
     } else {
 	errno = EIO;

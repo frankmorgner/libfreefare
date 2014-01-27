@@ -51,10 +51,11 @@ struct supported_reader {
 #define DEFAULT_READER_LIST_LENGTH 16
 
 static FreefareContext implicit_context = NULL;
+static const nfc_modulation LIBNFC_DEFAULT_MODULATION = {.nmt = NMT_ISO14443A, .nbr = NBR_106 };
 
 static MifareTag 	*_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
 
-static MifareTag	 _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type);
+static MifareTag	 _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type);
 
 static void 		 _reader_context_free(struct freefare_reader_context **conptr);
 static int 		 _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
@@ -78,7 +79,7 @@ MifareTag
 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai)
 {
     FreefareContext ctx = freefare_implicit_context();
-    return freefare_tag_new_ex(ctx, (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT) | FREEFARE_FLAG_READER_LIBNFC, FREEFARE_TAG_LIBNFC(device, nai), NO_TAG_TYPE);
+    return freefare_tag_new_ex(ctx, (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT) | FREEFARE_FLAG_READER_LIBNFC, FREEFARE_TAG_LIBNFC(device, nai, LIBNFC_DEFAULT_MODULATION), NO_TAG_TYPE);
 }
 
 /*
@@ -107,7 +108,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	    return NULL;
 	}
 
-	MifareTag result = _libnfc_tag_new(ctx, flags, slot, reader_tag.libnfc.nai, tag_type);
+	MifareTag result = _libnfc_tag_new(ctx, flags, slot, reader_tag.libnfc.nai, reader_tag.libnfc.modulation, tag_type);
 	_reader_device_free(ctx->reader_devices + slot);
 	return result;
     }
@@ -183,7 +184,7 @@ static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, Freefar
     return NULL;
 }
 
-static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
 {
 
     if(!ctx || !ctx->reader_devices[device_handle]) {
@@ -214,6 +215,7 @@ static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int d
      */
     result->libnfc.reader_device_handle = device_handle;
     result->libnfc.info = info;
+    result->libnfc.modulation = modulation;
     result->reader = reader_fns;
 
     /*
@@ -531,11 +533,8 @@ static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, stru
 	nfc_device_set_property_bool(ctx->reader_devices[device_handle]->device.libnfc,NP_ACTIVATE_FIELD,true);
 
 	// Poll for a ISO14443A (MIFARE) tag
-	nfc_modulation modulation = {
-		.nmt = NMT_ISO14443A,
-		.nbr = NBR_106
-	};
-	state->libnfc.candidates_length = nfc_initiator_list_passive_targets(ctx->reader_devices[device_handle]->device.libnfc, modulation, state->libnfc.candidates, state->libnfc.candidates_length);
+	state->libnfc.modulation = LIBNFC_DEFAULT_MODULATION;
+	state->libnfc.candidates_length = nfc_initiator_list_passive_targets(ctx->reader_devices[device_handle]->device.libnfc, state->libnfc.modulation, state->libnfc.candidates, state->libnfc.candidates_length);
 	if (state->libnfc.candidates_length < 0) {
 	    free(state->libnfc.candidates);
 	    state->libnfc.candidates_length = 0;
@@ -545,7 +544,7 @@ static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, stru
     }
 
     while(state->libnfc.candidate_index < state->libnfc.candidates_length) {
-	*result = _libnfc_tag_new(ctx, FREEFARE_FLAG_READER_LIBNFC, device_handle, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->tag_type);
+	*result = _libnfc_tag_new(ctx, FREEFARE_FLAG_READER_LIBNFC, device_handle, state->libnfc.candidates[state->libnfc.candidate_index].nti.nai, state->libnfc.modulation, state->tag_type);
 	state->libnfc.candidate_index++;
 	if(*result) {
 	    return 0;

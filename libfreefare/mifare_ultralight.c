@@ -307,7 +307,7 @@ mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key)
  * Callback for freefare_tag_new to test presence of a MIFARE UltralightC on the reader.
  */
 bool
-is_mifare_ultralightc_on_reader (nfc_device *device, nfc_iso14443a_info nai)
+mifare_ultralightc_is_on_reader (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag)
 {
     int ret;
     uint8_t cmd_step1[2];
@@ -315,15 +315,29 @@ is_mifare_ultralightc_on_reader (nfc_device *device, nfc_iso14443a_info nai)
     cmd_step1[0] = 0x1A;
     cmd_step1[1] = 0x00;
 
+    if(!(flags & FREEFARE_FLAG_READER_LIBNFC)) {
+	/*
+	 * Only implemented for libnfc
+	 */
+	return 0;
+    }
+
     nfc_target pnti;
-    nfc_modulation modulation = {
-	.nmt = NMT_ISO14443A,
-	.nbr = NBR_106
-    };
-    nfc_initiator_select_passive_target (device, modulation, nai.abtUid, nai.szUidLen, &pnti);
-    nfc_device_set_property_bool (device, NP_EASY_FRAMING, false);
-    ret = nfc_initiator_transceive_bytes (device, cmd_step1, sizeof (cmd_step1), res_step1, sizeof(res_step1), 0);
-    nfc_device_set_property_bool (device, NP_EASY_FRAMING, true);
-    nfc_initiator_deselect_target (device);
+    nfc_initiator_select_passive_target (tag.libnfc.device, tag.libnfc.modulation, tag.libnfc.nai.abtUid, tag.libnfc.nai.szUidLen, &pnti);
+    nfc_device_set_property_bool (tag.libnfc.device, NP_EASY_FRAMING, false);
+    ret = nfc_initiator_transceive_bytes (tag.libnfc.device, cmd_step1, sizeof (cmd_step1), res_step1, sizeof(res_step1), 0);
+    nfc_device_set_property_bool (tag.libnfc.device, NP_EASY_FRAMING, true);
+    nfc_initiator_deselect_target (tag.libnfc.device);
     return ret >= 0;
+}
+
+bool
+is_mifare_ultralightc_on_reader (nfc_device *device, nfc_iso14443a_info nai)
+{
+    FreefareContext ctx = freefare_implicit_context();
+    if(!ctx) {
+	return 0;
+    }
+
+    return mifare_ultralightc_is_on_reader(ctx, (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT) | FREEFARE_FLAG_READER_LIBNFC, FREEFARE_TAG_LIBNFC(device, nai, FREEFARE_LIBNFC_DEFAULT_MODULATION));
 }

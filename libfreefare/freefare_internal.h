@@ -173,7 +173,7 @@ struct supported_tag {
     uint8_t ATS_min_length;
     uint8_t ATS_compare_length;
     uint8_t ATS[5];
-    bool (*check_tag_on_reader) (nfc_device *, nfc_iso14443a_info);
+    bool (*check_tag_on_reader) (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
 };
 
 /*
@@ -342,6 +342,21 @@ struct freefare_context {
     } enumeration_state;
 };
 
+/*
+ * Get an implicit context for use by legacy functions.
+ */
+FreefareContext freefare_implicit_context(void);
+
+/*
+ * Flag macros, may change at compile time
+ */
+#define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC)
+#define FREEFARE_FLAG_MASK_GLOBAL_INHERIT (FREEFARE_FLAG_DISABLE_ISO14443_4)
+
+/*
+ * Needed in mifare_ultralightc.c
+ */
+const nfc_modulation FREEFARE_LIBNFC_DEFAULT_MODULATION;
 
 
 /*

@@ -106,7 +106,9 @@ int		 mifare_ultralight_read (MifareTag tag, const MifareUltralightPageNumber pa
 int		 mifare_ultralight_write (MifareTag tag, const MifareUltralightPageNumber page, const MifareUltralightPage data);
 
 int		 mifare_ultralightc_authenticate (MifareTag tag, const MifareDESFireKey key);
+__attribute__((deprecated))
 bool		 is_mifare_ultralightc_on_reader (nfc_device *device, nfc_iso14443a_info nai);
+bool		 mifare_ultralightc_is_on_reader (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
 
 typedef unsigned char MifareClassicBlock[16];
 

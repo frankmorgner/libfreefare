@@ -46,6 +46,8 @@ enum mifare_tag_type {
     DESFIRE
 };
 
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+
 typedef uint32_t FreefareFlags;
 #define FREEFARE_FLAG_READER_ALL	 (1UL<<0)
 #define FREEFARE_FLAG_READER_LIBNFC	 (1UL<<1)
@@ -69,16 +71,24 @@ typedef unsigned char MifareUltralightPage[4];
 typedef union {
     nfc_context *libnfc;
     SCARDCONTEXT pcsc;
+    char _dummy[64];
 } FreefareReaderContext;
 typedef union {
     nfc_device *libnfc;
     struct { SCARDCONTEXT context; char *device_name; } pcsc;
+    char _dummy[64];
 } FreefareReaderDevice;
 typedef union {
 	struct {nfc_device *device; nfc_iso14443a_info nai; nfc_modulation modulation;} libnfc;
-	struct {SCARDHANDLE card; DWORD active_protocol; } pcsc;
+	struct {SCARDCONTEXT context; char *device_name; uint32_t share_mode; } pcsc;
+	char _dummy[384];
 } FreefareReaderTag;
 
+static void __attribute__((unused)) _build_time_check(void) {
+    BUILD_BUG_ON(sizeof(FreefareReaderContext) > sizeof(((FreefareReaderContext*)(0))->_dummy));
+    BUILD_BUG_ON(sizeof(FreefareReaderDevice) > sizeof(((FreefareReaderDevice*)(0))->_dummy));
+    BUILD_BUG_ON(sizeof(FreefareReaderTag) > sizeof(((FreefareReaderTag*)(0))->_dummy));
+}
 
 #define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
 #define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}

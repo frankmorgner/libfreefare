@@ -205,6 +205,8 @@ struct mifare_tag {
 	nfc_target pnti;
     } libnfc;
     struct {
+	int reader_device_handle;
+	uint32_t share_mode;
 	SCARDHANDLE card;
 	DWORD active_protocol;
     } pcsc;
@@ -372,7 +374,7 @@ FreefareContext freefare_implicit_context(void);
 /*
  * Flag macros, may change at compile time
  */
-#define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC)
+#define FREEFARE_FLAG_MASK_READER_ALL (FREEFARE_FLAG_READER_LIBNFC|FREEFARE_FLAG_READER_PCSC)
 #define FREEFARE_FLAG_MASK_GLOBAL_INHERIT (FREEFARE_FLAG_DISABLE_ISO14443_4)
 
 /*

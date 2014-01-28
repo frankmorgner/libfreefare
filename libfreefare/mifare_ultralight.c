@@ -73,19 +73,19 @@
 #define ULTRALIGHT_TRANSCEIVE_RAW(tag, msg, res) \
     do { \
 	errno = 0; \
-	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, false) < 0) { \
+	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, NP_EASY_FRAMING, false) < 0) { \
 	    errno = EIO; \
 	    return -1; \
 	} \
 	DEBUG_XFER (msg, __##msg##_n, "===> "); \
 	int _res; \
-	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
-	    nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, true); \
+	if ((_res = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, msg, __##msg##_n, res, __##res##_size, 0)) < 0) { \
+	    nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, NP_EASY_FRAMING, true); \
 	    return errno = EIO, -1; \
 	} \
 	__##res##_n = _res; \
 	DEBUG_XFER (res, __##res##_n, "<=== "); \
-	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->device.libnfc, NP_EASY_FRAMING, true) < 0) { \
+	if (nfc_device_set_property_bool (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, NP_EASY_FRAMING, true) < 0) { \
 	    errno = EIO; \
 	    return -1; \
 	} \

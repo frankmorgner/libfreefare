@@ -176,6 +176,17 @@ struct supported_tag {
     bool (*check_tag_on_reader) (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
 };
 
+struct supported_reader {
+    FreefareFlags identifying_flag;
+    void(*tag_free)(MifareTag tag);
+    char*(*get_uid)(MifareTag tag);
+    const char*(*strerror)(MifareTag tag);
+    int(*connect)(MifareTag tag);
+    int(*disconnect)(MifareTag tag);
+    int(*transceive_bytes)(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
+};
+
+
 /*
  * This structure is common to all supported MIFARE targets but shall not be
  * used directly (it's some kind of abstract class).  All members in this
@@ -193,6 +204,10 @@ struct mifare_tag {
 	nfc_modulation modulation;
 	nfc_target pnti;
     } libnfc;
+    struct {
+	SCARDHANDLE card;
+	DWORD active_protocol;
+    } pcsc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;
     int active;
@@ -307,16 +322,22 @@ struct mifare_ultralight_tag {
 struct freefare_context {
     FreefareFlags global_flags;
     struct freefare_reader_device {
-	FreefareReaderDevice device;
 	FreefareFlags flags;
 	unsigned int internal:1;
 	unsigned int references;
+	union {
+	    nfc_device *libnfc;
+	    struct { SCARDCONTEXT context; char *device_name; } pcsc;
+	};
     } **reader_devices;
     size_t reader_devices_length;
     struct freefare_reader_context {
-	FreefareReaderContext context;
 	FreefareFlags flags;
 	unsigned int internal:1;
+	union {
+	    nfc_context *libnfc;
+	    SCARDCONTEXT pcsc;
+	};
     } **reader_contexts;
     size_t reader_contexts_length;
     struct freefare_enumeration_state {

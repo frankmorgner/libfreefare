@@ -26,6 +26,8 @@
 
 #include <nfc/nfc.h>
 
+#include <winscard.h>
+
 #ifdef __cplusplus
     extern "C" {
 #endif // __cplusplus
@@ -47,6 +49,7 @@ enum mifare_tag_type {
 typedef uint32_t FreefareFlags;
 #define FREEFARE_FLAG_READER_ALL	 (1UL<<0)
 #define FREEFARE_FLAG_READER_LIBNFC	 (1UL<<1)
+#define FREEFARE_FLAG_READER_PCSC	 (1UL<<2)
 
 #define FREEFARE_FLAG_AUTOCLOSE		 (1UL<<8)
 #define FREEFARE_FLAG_DISABLE_ISO14443_4 (1UL<<9)
@@ -63,14 +66,27 @@ typedef struct freefare_context *FreefareContext;
 typedef uint8_t MifareUltralightPageNumber;
 typedef unsigned char MifareUltralightPage[4];
 
-typedef union { nfc_context *libnfc; } FreefareReaderContext;
-typedef union { nfc_device *libnfc; } FreefareReaderDevice;
-typedef union { struct {nfc_device *device; nfc_iso14443a_info nai; nfc_modulation modulation;} libnfc; } FreefareReaderTag;
+typedef union {
+    nfc_context *libnfc;
+    SCARDCONTEXT pcsc;
+} FreefareReaderContext;
+typedef union {
+    nfc_device *libnfc;
+    struct { SCARDCONTEXT context; char *device_name; } pcsc;
+} FreefareReaderDevice;
+typedef union {
+	struct {nfc_device *device; nfc_iso14443a_info nai; nfc_modulation modulation;} libnfc;
+	struct {SCARDHANDLE card; DWORD active_protocol; } pcsc;
+} FreefareReaderTag;
 
 
 #define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
 #define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
 #define FREEFARE_TAG_LIBNFC(device, nai, modulation) (FreefareReaderTag){.libnfc = {device, nai, modulation}}
+
+#define FREEFARE_CONTEXT_PCSC(ctx) (FreefareReaderContext){.pcsc = ctx}
+#define FREEFARE_DEVICE_PCSC(ctx, device_name) (FreefareReaderDevice){.pcsc = {ctx, device_name}}
+#define FREEFARE_TAG_PCSC(ctx, device_name, share_mode) (FreefareReaderTag){.pcsc = {ctx, device_name, share_mode}}
 
 FreefareContext	 freefare_init (FreefareFlags flags);
 int		 freefare_context_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderContext context);

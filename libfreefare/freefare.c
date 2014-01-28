@@ -17,6 +17,8 @@
  * $Id$
  */
 
+#include "config.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -28,25 +30,29 @@
 #define NXP_MANUFACTURER_CODE 0x04
 
 static struct supported_tag supported_tags[] = {
-    { CLASSIC_1K,   "Mifare Classic 1k",            0x08, 0, 0, { 0x00 }, NULL },
+    { CLASSIC_1K,   "Mifare Classic 1k",            0x08, 0, 0, { 0x00 }, NULL, 0x0001 },
     { CLASSIC_1K,   "Mifare Classic 1k (Emulated)", 0x28, 0, 0, { 0x00 }, NULL },
     { CLASSIC_1K,   "Mifare Classic 1k (Emulated)", 0x68, 0, 0, { 0x00 }, NULL },
     { CLASSIC_1K,   "Infineon Mifare Classic 1k",   0x88, 0, 0, { 0x00 }, NULL },
-    { CLASSIC_4K,   "Mifare Classic 4k",            0x18, 0, 0, { 0x00 }, NULL },
+    { CLASSIC_4K,   "Mifare Classic 4k",            0x18, 0, 0, { 0x00 }, NULL, 0x0002 },
     { CLASSIC_4K,   "Mifare Classic 4k (Emulated)", 0x38, 0, 0, { 0x00 }, NULL },
-    { DESFIRE,      "Mifare DESFire",               0x20, 5, 4, { 0x75, 0x77, 0x81, 0x02 /*, 0xXX */ }, NULL},
-    { ULTRALIGHT_C, "Mifare UltraLightC",           0x00, 0, 0, { 0x00 }, mifare_ultralightc_is_on_reader },
-    { ULTRALIGHT,   "Mifare UltraLight",            0x00, 0, 0, { 0x00 }, NULL },
+    { DESFIRE,      "Mifare DESFire",               0x20, 5, 5, { 0x75, 0x77, 0x81, 0x02, 0x80 }, NULL},
+    { DESFIRE,      "Mifare DESFire",               0x20, 5, 5, { 0x75, 0x77, 0x81, 0x02, 0x8F }, NULL}, /* A DESfire card with incomplete format procedure */
+    { ULTRALIGHT_C, "Mifare UltraLightC",           0x00, 0, 0, { 0x00 }, mifare_ultralightc_is_on_reader, 0x003A },
+    { ULTRALIGHT,   "Mifare UltraLight",            0x00, 0, 0, { 0x00 }, NULL, 0x0003 },
 };
 
 #define DEFAULT_READER_LIST_LENGTH 16
 
 static FreefareContext implicit_context = NULL;
 const nfc_modulation FREEFARE_LIBNFC_DEFAULT_MODULATION = {.nmt = NMT_ISO14443A, .nbr = NBR_106 };
+#define FREEFARE_PCSC_DEFAULT_SHARE_MODE SCARD_SHARE_EXCLUSIVE
 
 static MifareTag 	*_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state);
 
 static MifareTag	 _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type);
+static MifareTag	 _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint32_t share_mode, enum mifare_tag_type tag_type);
+
 
 static void 		 _reader_context_free(struct freefare_reader_context **conptr);
 static int 		 _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device);
@@ -103,7 +109,29 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	_reader_device_free(ctx->reader_devices + slot);
 	return result;
     } else if(flags & FREEFARE_FLAG_READER_PCSC) {
-#error Implement
+	struct freefare_reader_device *reader_device = calloc(1, sizeof(*reader_device));
+	if(!reader_device) {
+	    return NULL;
+	}
+
+	reader_device->flags = FREEFARE_FLAG_READER_PCSC | (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT);
+	reader_device->internal = 1;
+	reader_device->pcsc.context = reader_tag.pcsc.context;
+	reader_device->pcsc.device_name = strdup(reader_tag.pcsc.device_name);
+	if(!reader_device->pcsc.device_name) {
+	    _reader_device_free(&reader_device);
+	    return NULL;
+	}
+
+	int slot = _reader_device_store(ctx, reader_device);
+	if(slot < 0) {
+	    _reader_device_free(&reader_device);
+	    return NULL;
+	}
+
+	MifareTag result = _pcsc_tag_new(ctx, flags, slot, reader_tag.pcsc.share_mode, tag_type);
+	_reader_device_free(ctx->reader_devices + slot);
+	return result;
     }
 
     return NULL;
@@ -155,7 +183,7 @@ static MifareTag _freefare_tag_allocate(FreefareContext ctx, FreefareFlags flags
  * TODO: Currently only determines the tag type. Does not correctly account
  * for multiple identity tags (e.g. SmartMX with included Classic emulation).
  */
-static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, enum mifare_tag_type tag_type)
+static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
 {
     /* Ensure the target is supported */
     for (size_t i = 0; i < sizeof (supported_tags) / sizeof (struct supported_tag); i++) {
@@ -164,10 +192,7 @@ static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, Freefar
 	    (!supported_tags[i].ATS_min_length || ((info.szAtsLen >= supported_tags[i].ATS_min_length) &&
 						   (0 == memcmp (info.abtAts, supported_tags[i].ATS, supported_tags[i].ATS_compare_length)))) &&
 	    ((supported_tags[i].check_tag_on_reader == NULL) ||
-	     supported_tags[i].check_tag_on_reader(ctx, flags, FREEFARE_TAG_LIBNFC(device->libnfc, info, FREEFARE_LIBNFC_DEFAULT_MODULATION)))) {
-		/*
-		 * FIXME The FREEFARE_TAG_LIBNFC above is bonkers. This method should have gotten a FreefareReaderTag object passed in. Or actual, a FreefareReaderTagInternal (to be defined) or something.
-		 */
+	     supported_tags[i].check_tag_on_reader(ctx, flags, FREEFARE_TAG_LIBNFC(device->libnfc, info, modulation)))) {
 
 	    if(tag_type == NO_TAG_TYPE || supported_tags[i].type == tag_type) {
 		return &(supported_tags[i]);
@@ -190,7 +215,7 @@ static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int d
 	return NULL;
     }
 
-    const struct supported_tag *tag_info = _libnfc_tag_type(ctx, flags, ctx->reader_devices[device_handle], info, tag_type);
+    const struct supported_tag *tag_info = _libnfc_tag_type(ctx, flags, ctx->reader_devices[device_handle], info, modulation, tag_type);
     if(!tag_info) {
 	return NULL;
     }
@@ -247,6 +272,158 @@ static int _libnfc_disconnect(MifareTag tag)
 static int _libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
     return nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, send, send_length, recv, recv_length, timeout);
+}
+
+static const struct supported_tag *_pcsc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, uint32_t share_mode, enum mifare_tag_type tag_type)
+{
+    if(!ctx || !device) {
+	return NULL;
+    }
+
+    SCARD_READERSTATE reader_states[1];
+    memset(&reader_states, 0, sizeof(reader_states));
+    reader_states[0].szReader = device->pcsc.device_name;
+    reader_states[0].dwCurrentState = SCARD_STATE_UNAWARE;
+
+    LONG rv = SCardGetStatusChange(device->pcsc.context, INFINITE, reader_states, 1);
+    if(rv != SCARD_S_SUCCESS) {
+	return NULL;
+    }
+
+    /*
+     * Reject non-present or exclusively held cards
+     */
+    if(!(reader_states[0].dwEventState & SCARD_STATE_PRESENT) || (reader_states[0].dwEventState & SCARD_STATE_INUSE) || (reader_states[0].dwEventState & SCARD_STATE_EXCLUSIVE)) {
+	return NULL;
+    }
+
+    /*
+     * The PC/SC IFD subsystem has already identified the card type and encodes that
+     * information in the ATR, see PC/SC part 3, section 3.1.3.2.3 and PC/SC part 3 supplemental document.
+     * This directly gives the type of storage cards, but only the historical bytes of the ATS for smart-cards, like DESfire.
+     * If ATS is provided in supported_tags, extract and compare the historical bytes.
+     */
+    int pcsc_name = -1;
+    uint8_t *hist_bytes = NULL;
+    size_t hist_bytes_length = 0;
+
+    const uint8_t pcsc_contactless_atr[] =      {0x3B, 0x80, 0x80, 0x01};
+    const uint8_t pcsc_contactless_atr_mask[] = {0xFF, 0xF0, 0xFF, 0xFF};
+    const uint8_t pcsc_rid[]                  = {0xA0, 0x00, 0x00, 0x03, 0x06};
+    if(reader_states[0].cbAtr < sizeof(pcsc_contactless_atr)) {
+	return NULL;
+    }
+
+    for(int i=0; i<sizeof(pcsc_contactless_atr); i++) {
+	if( (reader_states[0].rgbAtr[i] & pcsc_contactless_atr_mask[i])  !=  (pcsc_contactless_atr[i] & pcsc_contactless_atr_mask[i]) ) {
+	    return NULL;
+	}
+    }
+
+    hist_bytes_length = reader_states[0].rgbAtr[1] & 0x0F;
+    if(reader_states[0].cbAtr < sizeof(pcsc_contactless_atr) + hist_bytes_length) {
+	return NULL;
+    }
+
+    hist_bytes = reader_states[0].rgbAtr + sizeof(pcsc_contactless_atr);
+    if(hist_bytes_length >= 3 && hist_bytes[0] == 0x80 && hist_bytes[1] == 0x4F) {
+	uint8_t * ai = hist_bytes + 3;
+	size_t ai_length = hist_bytes[2];
+	if(hist_bytes_length >= ai_length + 3) {
+	    if(ai_length >= sizeof(pcsc_rid) && memcmp(ai, pcsc_rid, sizeof(pcsc_rid)) == 0) {
+		if(ai_length >= sizeof(pcsc_rid) + 3) {
+		    pcsc_name = ((int)ai[sizeof(pcsc_rid) + 1] << 8) | ((int)ai[sizeof(pcsc_rid) + 2]);
+		}
+	    }
+	}
+    }
+
+    for (size_t i = 0; i < sizeof (supported_tags) / sizeof (supported_tags[0]); i++) {
+	int check_applied = 0;
+
+	if(pcsc_name != -1) {
+	    check_applied = 1;
+	    if(supported_tags[i].pcsc_name != pcsc_name) {
+		continue;
+	    }
+	}
+
+	if(supported_tags[i].ATS_min_length > 1) {
+	    int hist_bytes_offset = 1;
+	    if(supported_tags[i].ATS[0] & 0x40) hist_bytes_offset++;
+	    if(supported_tags[i].ATS[0] & 0x20) hist_bytes_offset++;
+	    if(supported_tags[i].ATS[0] & 0x10) hist_bytes_offset++;
+	    int hist_bytes_compare_length = supported_tags[i].ATS_compare_length - hist_bytes_offset;
+	    if(hist_bytes_compare_length > 0) {
+		check_applied = 1;
+		if(hist_bytes_compare_length > hist_bytes_length || memcmp(hist_bytes, supported_tags[i].ATS + hist_bytes_offset, hist_bytes_compare_length) != 0) {
+		    continue;
+		}
+	    }
+	}
+
+	if(supported_tags[i].check_tag_on_reader != NULL){
+	    check_applied = 1;
+	    if(!supported_tags[i].check_tag_on_reader(ctx, flags, FREEFARE_TAG_PCSC(device->pcsc.context, device->pcsc.device_name, share_mode))) {
+		continue;
+	    }
+	}
+
+	if(!check_applied) {
+	    /*
+	     * Need to have verified at least one property
+	     */
+	    continue;
+	}
+
+	if(tag_type == NO_TAG_TYPE || supported_tags[i].type == tag_type) {
+	    return &(supported_tags[i]);
+	}
+    }
+
+
+    return NULL;
+}
+
+static MifareTag _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint32_t share_mode, enum mifare_tag_type tag_type)
+{
+    if(!ctx || !ctx->reader_devices[device_handle]) {
+	return NULL;
+    }
+
+    const struct supported_reader *reader_fns = _reader_driver_lookup(FREEFARE_FLAG_READER_PCSC);
+    if(!reader_fns) {
+	return NULL;
+    }
+
+
+    const struct supported_tag *tag_info = _pcsc_tag_type(ctx, flags, ctx->reader_devices[device_handle], share_mode, tag_type);
+    if(!tag_info) {
+	return NULL;
+    }
+
+    if(tag_type != NO_TAG_TYPE && tag_info->type != tag_type) {
+	return NULL;
+    }
+
+    MifareTag result = _freefare_tag_allocate(ctx, flags, tag_info);
+    if(!result) {
+	return NULL;
+    }
+
+    /*
+     * Initialize pcsc specific fields
+     */
+    result->pcsc.reader_device_handle = device_handle;
+    result->pcsc.share_mode = share_mode;
+    result->reader = reader_fns;
+
+    /*
+     * Increment reference count on the reader_device
+     */
+    result->ctx->reader_devices[result->pcsc.reader_device_handle]->references++;
+
+    return result;
 }
 
 static void _pcsc_tag_free(MifareTag tag)
@@ -703,6 +880,7 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 	    state->tmp_device_handle = _reader_device_store(ctx, state->tmp_device);
 	    if(state->tmp_device_handle < 0) {
 		_reader_device_free(&state->tmp_device);
+		state->tmp_device = NULL;
 		return -1;
 	    }
 	}
@@ -725,6 +903,7 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
 	 * will close and free the device structure.
 	 */
 	_reader_device_free(ctx->reader_devices + state->tmp_device_handle);
+	state->tmp_device = NULL;
 	state->context_device_index++;
     }
 
@@ -763,6 +942,139 @@ static void _pcsc_context_free(struct freefare_reader_context *context)
 	SCardReleaseContext(context->pcsc);
     }
     free(context);
+}
+
+static struct freefare_reader_device *_pcsc_device_open(struct freefare_reader_context *context, const char *device_name, FreefareFlags flags)
+{
+    if(!context || !(context->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return NULL;
+    }
+
+    struct freefare_reader_device *result = calloc(1, sizeof(*result));
+    if(!result) {
+	return NULL;
+    }
+
+    result->pcsc.context = context->pcsc;
+    result->pcsc.device_name = strdup(device_name);
+    if(!result->pcsc.device_name) {
+	free(result);
+	return NULL;
+    }
+
+    result->flags = flags | FREEFARE_FLAG_READER_PCSC;
+    result->references = 1;
+
+    return result;
+
+}
+
+static void _pcsc_device_free(struct freefare_reader_device *device)
+{
+    if(!device) {
+	return;
+    }
+    if(device->pcsc.device_name) {
+	free(device->pcsc.device_name);
+    }
+    free(device);
+}
+
+static int _pcsc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
+{
+    if(!ctx || !ctx->reader_devices[device_handle]) {
+	return -1;
+    }
+
+    if(!state->pcsc.reader_handled) {
+	/*
+	 * _pcsc_tag_new will abort if no (handleable) tag is present.
+	 */
+	*result = _pcsc_tag_new(ctx, FREEFARE_FLAG_READER_PCSC, device_handle, FREEFARE_PCSC_DEFAULT_SHARE_MODE, state->tag_type);
+	state->pcsc.reader_handled = 1;
+    } else {
+	state->pcsc.reader_handled = 0;
+    }
+
+    return 0;
+}
+
+static int _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *context, struct freefare_enumeration_state *state, MifareTag *result)
+{
+    if(!ctx || !context || !state || !result) {
+	return -1;
+    }
+
+    if(!state->pcsc.readers) {
+	/*
+	 * Enumerate readers
+	 */
+	DWORD readers_length = SCARD_AUTOALLOCATE;
+	LONG rv = SCardListReaders(context->pcsc, NULL, (LPTSTR)&state->pcsc.readers, &readers_length);
+
+	if(rv != SCARD_E_NO_READERS_AVAILABLE && rv != SCARD_S_SUCCESS) {
+	    SCardFreeMemory(context->pcsc, state->pcsc.readers);
+	    state->pcsc.readers = NULL;
+	    return -1;
+	}
+	if(rv == SCARD_E_NO_READERS_AVAILABLE) {
+	    state->pcsc.readers = NULL;
+	}
+
+	state->pcsc.last_reader_returned = NULL;
+    }
+
+    while(state->pcsc.readers && (!state->pcsc.last_reader_returned || state->pcsc.last_reader_returned[0] != 0) ) {
+	char *device_name;
+	if(!state->pcsc.last_reader_returned) {
+	    device_name = state->pcsc.readers;
+	} else {
+	    device_name = state->pcsc.last_reader_returned + strlen(state->pcsc.last_reader_returned) + 1;
+	}
+
+	if(device_name[0] == 0) {
+	    break;
+	}
+
+	if(!state->tmp_device) {
+	    state->tmp_device = _pcsc_device_open(context, device_name,
+		    FREEFARE_FLAG_AUTOCLOSE | (context->flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT));
+	    if(!state->tmp_device) {
+		/*
+		 * TODO Properly free state->pcsc.readers?
+		 */
+		return -1;
+	    }
+	    state->tmp_device->internal = 1;
+	    state->tmp_device_handle = _reader_device_store(ctx, state->tmp_device);
+	    if(state->tmp_device_handle < 0) {
+		_reader_device_free(&state->tmp_device);
+		state->tmp_device = NULL;
+		return -1;
+	    }
+	}
+
+	if(_pcsc_enumerate_device(ctx, state->tmp_device_handle, state, result) < 0) {
+	    return -1;
+	}
+
+	if(*result) {
+	    return 0;
+	}
+
+	_reader_device_free(ctx->reader_devices + state->tmp_device_handle);
+	state->tmp_device = NULL;
+	state->pcsc.last_reader_returned = device_name;
+
+    }
+
+    if(state->pcsc.readers) {
+	SCardFreeMemory(context->pcsc, state->pcsc.readers);
+	state->pcsc.readers = NULL;
+    }
+    state->pcsc.last_reader_returned = NULL;
+
+    return 0;
 }
 
 static int _embiggen_array(void **array, size_t *array_length, size_t element_size, size_t min_elements)
@@ -1024,6 +1336,10 @@ MifareTag _freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_
 	free(state->libnfc.connstrings);
 	state->libnfc.connstrings = NULL;
     }
+
+    /*
+     * FIXME Clean up PC/SC enumeration
+     */
 
     if(!state->single_device) {
 	state->device_handle = -1;

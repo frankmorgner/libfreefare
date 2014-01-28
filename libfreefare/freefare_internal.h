@@ -175,6 +175,7 @@ struct supported_tag {
     uint8_t ATS_compare_length;
     uint8_t ATS[5];
     bool (*check_tag_on_reader) (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag tag);
+    int pcsc_name;
 };
 
 struct supported_reader {
@@ -363,6 +364,11 @@ struct freefare_context {
 	    size_t candidates_length;
 	    int candidate_index;
 	} libnfc;
+	struct {
+	    LPTSTR readers;
+	    char *last_reader_returned;
+	    int reader_handled;
+	} pcsc;
 	enum mifare_tag_type tag_type;
     } enumeration_state;
 };

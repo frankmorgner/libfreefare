@@ -285,10 +285,12 @@ mifare_classic_authenticate (MifareTag tag, const MifareClassicBlockNumber block
     BUFFER_APPEND(cmd, block);
     BUFFER_APPEND_BYTES (cmd, key, 6);
     // To support both 4-byte & 7-byte UID cards:
-    /*
-     * FIXME Should change the internal definition of (struct supported_reader).get_uid to return binary data, change the externally visible get_uid function to perform the conversion itself
-     */
-    BUFFER_APPEND_BYTES (cmd, tag->libnfc.info.abtUid + tag->libnfc.info.szUidLen - 4, 4);
+    uint8_t tmp[MAX_UID_LENGTH];
+    int r = tag->reader->get_uid(tag, tmp, sizeof(tmp));
+    if(r < 0) {
+	return -1;
+    }
+    BUFFER_APPEND_BYTES (cmd, tmp + r - 4, 4);
 
     CLASSIC_TRANSCEIVE_EX (tag, cmd, res, 1);
 

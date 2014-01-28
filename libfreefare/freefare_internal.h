@@ -98,6 +98,7 @@
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
 #define MAX_CRYPTO_BLOCK_SIZE 16
+#define MAX_UID_LENGTH 10
 
 void		*memdup (const void *p, const size_t n);
 
@@ -179,11 +180,11 @@ struct supported_tag {
 struct supported_reader {
     FreefareFlags identifying_flag;
     void(*tag_free)(MifareTag tag);
-    char*(*get_uid)(MifareTag tag);
+    int(*get_uid)(MifareTag tag, uint8_t *uid, size_t uid_length);
     const char*(*strerror)(MifareTag tag);
     int(*connect)(MifareTag tag);
     int(*disconnect)(MifareTag tag);
-    int(*transceive_bytes)(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
+    int(*transceive_bytes)(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
 };
 
 

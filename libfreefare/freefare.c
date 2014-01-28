@@ -244,7 +244,7 @@ static int _libnfc_disconnect(MifareTag tag)
     return nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc);
 }
 
-static int _libnfc_transceive_bytes(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
+static int _libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
     return nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, send, send_length, recv, recv_length, timeout);
 }
@@ -277,7 +277,7 @@ static int _pcsc_disconnect(MifareTag tag)
     return rv == SCARD_S_SUCCESS;
 }
 
-static int _pcsc_transceive_bytes(MifareTag tag, uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
+static int _pcsc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
     const SCARD_IO_REQUEST *send_pci;
     SCARD_IO_REQUEST recv_pci;
@@ -376,32 +376,63 @@ freefare_get_tag_friendly_name (MifareTag tag)
 /*
  * Returns the UID of the provided tag.
  */
+
 char *
 freefare_get_tag_uid (MifareTag tag)
 {
     if(!tag || !tag->reader) {
 	return NULL;
     }
-    return tag->reader->get_uid(tag);
-}
 
-static char *
-_libnfc_get_tag_uid(MifareTag tag)
-{
-    if(!tag) {
+    uint8_t tmp[MAX_UID_LENGTH];
+    int r = tag->reader->get_uid(tag, tmp, sizeof(tmp));
+
+    char *res = malloc (2 * r + 1);
+    if(!res) {
 	return NULL;
     }
-    char *res = malloc (2 * tag->libnfc.info.szUidLen + 1);
-    for (size_t i =0; i < tag->libnfc.info.szUidLen; i++)
-        snprintf (res + 2*i, 3, "%02x", tag->libnfc.info.abtUid[i]);
+
+    for (size_t i =0; i < r; i++)
+        snprintf (res + 2*i, 3, "%02x", tmp[i]);
+
     return res;
 }
 
-static char *
-_pcsc_get_tag_uid(MifareTag tag)
+static int
+_libnfc_get_tag_uid(MifareTag tag, uint8_t *uid, size_t uid_length)
 {
-#error Implement
-    return NULL;
+    if(!tag) {
+	return -1;
+    }
+
+    int r = tag->libnfc.info.szUidLen;
+    if(r > uid_length) {
+	r = uid_length;
+    }
+    memcpy(uid, tag->libnfc.info.abtUid, r);
+
+    return r;
+}
+
+static const uint8_t GET_UID_COMMAND[] = {0xff, 0xca, 0x00, 0x00, 0x00};
+
+static int
+_pcsc_get_tag_uid(MifareTag tag, uint8_t *uid, size_t uid_length)
+{
+    uint8_t tmp[MAX_UID_LENGTH + 2];
+
+    int r = tag->reader->transceive_bytes(tag, GET_UID_COMMAND, sizeof(GET_UID_COMMAND), tmp, sizeof(tmp), 0);
+    if(r < 2 || tmp[r-2] != 0x90 || tmp[r-1] != 0x00) {
+	return -1;
+    }
+
+    r-=2;
+    if(r > uid_length) {
+	r = uid_length;
+    }
+    memcpy(uid, tmp, r);
+
+    return r;
 }
 
 /*

@@ -443,14 +443,22 @@ static int _pcsc_connect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
     struct freefare_reader_device *rd = tag->ctx->reader_devices[tag->pcsc.reader_device_handle];
-    LONG rv = SCardConnect(rd->pcsc.context, rd->pcsc.device_name, tag->pcsc.share_mode, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &tag->pcsc.card, &tag->pcsc.active_protocol);
+    DWORD share_mode = tag->pcsc.share_mode;
+    if(tag->pcsc.temp_connect) {
+	share_mode = SCARD_SHARE_SHARED;
+    }
+    LONG rv = SCardConnect(rd->pcsc.context, rd->pcsc.device_name, share_mode, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &tag->pcsc.card, &tag->pcsc.active_protocol);
     return rv == SCARD_S_SUCCESS;
 }
 
 static int _pcsc_disconnect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
-    LONG rv = SCardDisconnect(tag->pcsc.card, SCARD_RESET_CARD);
+    DWORD disposition = SCARD_RESET_CARD;
+    if(tag->pcsc.temp_connect) {
+	disposition = SCARD_LEAVE_CARD;
+    }
+    LONG rv = SCardDisconnect(tag->pcsc.card, disposition);
     return rv == SCARD_S_SUCCESS;
 }
 
@@ -475,7 +483,7 @@ static int _pcsc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t sen
     if(result != SCARD_S_SUCCESS) {
 	return -1;
     } else {
-	return recv_length;
+	return recv_length_;
     }
 
 }
@@ -597,8 +605,28 @@ static int
 _pcsc_get_tag_uid(MifareTag tag, uint8_t *uid, size_t uid_length)
 {
     uint8_t tmp[MAX_UID_LENGTH + 2];
+    int r;
 
-    int r = tag->reader->transceive_bytes(tag, GET_UID_COMMAND, sizeof(GET_UID_COMMAND), tmp, sizeof(tmp), 0);
+    if(!tag || !tag->ctx) {
+	return -1;
+    }
+
+    if(!tag->active) {
+	tag->pcsc.temp_connect = 1;
+	r = tag->reader->connect(tag);
+	if(r < 0) {
+	    tag->pcsc.temp_connect = 0;
+	    return r;
+	}
+    }
+
+    r = tag->reader->transceive_bytes(tag, GET_UID_COMMAND, sizeof(GET_UID_COMMAND), tmp, sizeof(tmp), 0);
+
+    if(tag->pcsc.temp_connect) {
+	tag->reader->disconnect(tag);
+	tag->pcsc.temp_connect = 0;
+    }
+
     if(r < 2 || tmp[r-2] != 0x90 || tmp[r-1] != 0x00) {
 	return -1;
     }
@@ -1064,6 +1092,7 @@ static int _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_c
 
 	_reader_device_free(ctx->reader_devices + state->tmp_device_handle);
 	state->tmp_device = NULL;
+	state->pcsc.reader_handled = 0;
 	state->pcsc.last_reader_returned = device_name;
 
     }

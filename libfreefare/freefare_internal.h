@@ -211,6 +211,7 @@ struct mifare_tag {
 	uint32_t share_mode;
 	SCARDHANDLE card;
 	DWORD active_protocol;
+	unsigned int temp_connect:1;
     } pcsc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;

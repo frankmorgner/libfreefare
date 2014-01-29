@@ -1523,6 +1523,12 @@ read_data (MifareTag tag, uint8_t command, uint8_t file_no, off_t offset, size_t
     BUFFER_APPEND_LE (cmd, offset, 3, sizeof (off_t));
     BUFFER_APPEND_LE (cmd, length, 3, sizeof (size_t));
 
+    /*
+     * Use a temporary receive buffer that grows dynamically in size.
+     */
+    size_t tmp_buf_length = 0;
+    uint8_t *tmp_buf = NULL;
+
     uint8_t ocs = cs;
     if ((MIFARE_DESFIRE (tag)->session_key) && (cs | MDCM_MACED)) {
 	switch (MIFARE_DESFIRE (tag)->authentication_scheme) {
@@ -1536,26 +1542,40 @@ read_data (MifareTag tag, uint8_t command, uint8_t file_no, off_t offset, size_t
     uint8_t *p = mifare_cryto_preprocess_data (tag, cmd, &__cmd_n, 8, MDCM_PLAIN | CMAC_COMMAND);
     cs = ocs;
 
-    /*
-     * FIXME: This is bogus: the user has to provide a data buffer with enougth
-     * room to store CRC + padding or MAC.  If the user wants to read 1 byte,
-     * there is no reason to provide a 16 bytes buffer.
-     */
     do {
 	DESFIRE_TRANSCEIVE2 (tag, p, __cmd_n, res);
 
 	size_t frame_bytes = BUFFER_SIZE (res) - 1;
-	memcpy ((uint8_t *)data + bytes_received, res, frame_bytes);
+	size_t new_tmp_buf_length = tmp_buf_length + frame_bytes + 1;
+	if(new_tmp_buf_length < tmp_buf_length) {
+	    free(tmp_buf);
+	    return errno = EOVERFLOW, -1;
+	}
+	uint8_t *new_tmp_buf = realloc(tmp_buf, new_tmp_buf_length);
+	if(!new_tmp_buf) {
+	    free(tmp_buf);
+	    return errno = ENOMEM, -1;
+	} else {
+	    tmp_buf = new_tmp_buf;
+	    tmp_buf_length = new_tmp_buf_length;
+	}
+	memcpy ((uint8_t *)tmp_buf + bytes_received, res, frame_bytes);
 	bytes_received += frame_bytes;
 
 	p[0] = 0xAF;
 	__cmd_n = 1;
     } while (0xAF == res[__res_n-1]);
 
-    ((uint8_t *)data)[bytes_received++] = 0x00;
+    ((uint8_t *)tmp_buf)[bytes_received++] = 0x00;
 
     ssize_t sr = bytes_received;
-    p = mifare_cryto_postprocess_data (tag, data, &sr, cs | CMAC_COMMAND | CMAC_VERIFY | MAC_VERIFY);
+    p = mifare_cryto_postprocess_data (tag, tmp_buf, &sr, cs | CMAC_COMMAND | CMAC_VERIFY | MAC_VERIFY);
+
+    if(sr >= 0) {
+	memcpy(data, tmp_buf, sr);
+    }
+    memset(tmp_buf, 0, tmp_buf_length);
+    free(tmp_buf);
 
     if (!p)
 	return errno = EINVAL, -1;

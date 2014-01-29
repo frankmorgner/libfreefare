@@ -367,6 +367,7 @@ struct freefare_context {
 	    int candidate_index;
 	} libnfc;
 	struct {
+	    SCARDCONTEXT context;
 	    LPTSTR readers;
 	    char *last_reader_returned;
 	    int reader_handled;

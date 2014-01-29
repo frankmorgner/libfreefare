@@ -1067,6 +1067,7 @@ _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *con
 	 */
 	DWORD readers_length = SCARD_AUTOALLOCATE;
 	LONG rv = SCardListReaders(context->pcsc, NULL, (LPTSTR)&state->pcsc.readers, &readers_length);
+	state->pcsc.context = context->pcsc;
 
 	if(rv != SCARD_E_NO_READERS_AVAILABLE && rv != SCARD_S_SUCCESS) {
 	    SCardFreeMemory(context->pcsc, state->pcsc.readers);
@@ -1096,9 +1097,6 @@ _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *con
 	    state->tmp_device = _pcsc_device_open(context, device_name,
 		    FREEFARE_FLAG_AUTOCLOSE | (context->flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT));
 	    if(!state->tmp_device) {
-		/*
-		 * TODO Properly free state->pcsc.readers?
-		 */
 		return -1;
 	    }
 	    state->tmp_device->internal = 1;
@@ -1382,15 +1380,9 @@ _freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_state *stat
     return result;
 }
 
-static MifareTag
-_freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_state *state, enum mifare_tag_type tag_type)
+static void
+_libnfc_enumeration_state_clean(struct freefare_enumeration_state *state)
 {
-    if(!ctx || !state) {
-	return NULL;
-    }
-    /*
-     * If there's currently an enumeration ongoing, clean it up
-     */
     if(state->libnfc.device) {
 	nfc_close(state->libnfc.device);
 	state->libnfc.device = NULL;
@@ -1400,11 +1392,40 @@ _freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_state *sta
 	free(state->libnfc.connstrings);
 	state->libnfc.connstrings = NULL;
     }
+}
+
+static void
+_pcsc_enumeration_state_clean(struct freefare_enumeration_state *state)
+{
+    if(state->pcsc.readers) {
+	SCardFreeMemory(state->pcsc.context, state->pcsc.readers);
+	state->pcsc.readers = NULL;
+    }
+    state->pcsc.last_reader_returned = NULL;
+    state->pcsc.reader_handled = 0;
+}
+
+static void
+_freefare_enumeration_state_clean(struct freefare_enumeration_state *state)
+{
+    _libnfc_enumeration_state_clean(state);
+    _pcsc_enumeration_state_clean(state);
+}
+
+static MifareTag
+_freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_state *state, enum mifare_tag_type tag_type)
+{
+    if(!ctx || !state) {
+	return NULL;
+    }
+    /*
+     * If there's currently an enumeration ongoing, clean it up
+     */
+    _freefare_enumeration_state_clean(state);
 
     /*
-     * FIXME Clean up PC/SC enumeration
+     * Reset handles
      */
-
     if(!state->single_device) {
 	state->device_handle = -1;
     }
@@ -1539,6 +1560,8 @@ freefare_exit (FreefareContext ctx)
     if(ctx->reader_devices) {
 	free(ctx->reader_devices);
     }
+
+    _freefare_enumeration_state_clean(&ctx->enumeration_state);
 
     memset(ctx, 0, sizeof(*ctx));
     free(ctx);

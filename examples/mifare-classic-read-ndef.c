@@ -66,7 +66,6 @@ int
 main(int argc, char *argv[])
 {
     int error = 0;
-    nfc_device *device = NULL;
     MifareTag *tags = NULL;
     Mad mad;
 
@@ -112,135 +111,117 @@ main(int argc, char *argv[])
 	}
     }
 
-    nfc_connstring devices[8];
-    size_t device_count;
+    FreefareContext ctx = freefare_init(FREEFARE_FLAG_READER_ALL);
+    if (ctx == NULL)
+	errx(EXIT_FAILURE, "Unable to init libfreefare");
 
-    nfc_context *context;
-    nfc_init (&context);
-    if (context == NULL)
-	errx(EXIT_FAILURE, "Unable to init libnfc (malloc)");
+    tags = freefare_tags_get (ctx, NO_TAG_TYPE);
+    if (!tags) {
+	freefare_exit(ctx);
+	errx (EXIT_FAILURE, "Error listing MIFARE classic tag.");
+    }
 
-    device_count= nfc_list_devices (context, devices, 8);
-    if (device_count <= 0)
-	errx (EXIT_FAILURE, "No NFC device found.");
-
-    for (size_t d = 0; d < device_count; d++) {
-        device = nfc_open (context, devices[d]);
-        if (!device) {
-            warnx ("nfc_open() failed.");
-            error = EXIT_FAILURE;
-            continue;
-        }
-
-	tags = freefare_get_tags (device);
-	if (!tags) {
-	    nfc_close (device);
-	    errx (EXIT_FAILURE, "Error listing MIFARE classic tag.");
+    for (int i = 0; (!error) && tags[i]; i++) {
+	switch (freefare_get_tag_type (tags[i])) {
+	case CLASSIC_1K:
+	case CLASSIC_4K:
+	    break;
+	default:
+	    continue;
 	}
 
-	for (int i = 0; (!error) && tags[i]; i++) {
-	    switch (freefare_get_tag_type (tags[i])) {
-	    case CLASSIC_1K:
-	    case CLASSIC_4K:
-		break;
-	    default:
-		continue;
-	    }
+	char *tag_uid = freefare_get_tag_uid (tags[i]);
+	char buffer[BUFSIZ];
 
-	    char *tag_uid = freefare_get_tag_uid (tags[i]);
-	    char buffer[BUFSIZ];
+	fprintf (message_stream, "Found %s with UID %s. ", freefare_get_tag_friendly_name (tags[i]), tag_uid);
 
-	    fprintf (message_stream, "Found %s with UID %s. ", freefare_get_tag_friendly_name (tags[i]), tag_uid);
+	bool read_ndef = true;
+	if (read_options.interactive) {
+	    fprintf (message_stream, "Read NDEF [yN] ");
+	    fgets (buffer, BUFSIZ, stdin);
+	    read_ndef = ((buffer[0] == 'y') || (buffer[0] == 'Y'));
+	} else {
+	    fprintf (message_stream, "\n");
+	}
 
-	    bool read_ndef = true;
-	    if (read_options.interactive) {
-		fprintf (message_stream, "Read NDEF [yN] ");
-		fgets (buffer, BUFSIZ, stdin);
-		read_ndef = ((buffer[0] == 'y') || (buffer[0] == 'Y'));
+	if (read_ndef) {
+	    // NFCForum card has a MAD, load it.
+	    if (0 == mifare_classic_connect (tags[i])) {
 	    } else {
-		fprintf (message_stream, "\n");
+		freefare_perror (tags[i], "mifare_classic_connect");
+		error = EXIT_FAILURE;
+		goto error;
 	    }
 
-	    if (read_ndef) {
-		// NFCForum card has a MAD, load it.
-		if (0 == mifare_classic_connect (tags[i])) {
-		} else {
-		    nfc_perror (device, "mifare_classic_connect");
-		    error = EXIT_FAILURE;
-		    goto error;
-		}
-
-		if ((mad = mad_read (tags[i]))) {
-		    // Dump the NFCForum application using MAD information
-		    uint8_t buffer[4096];
-		    ssize_t len;
-		    if ((len = mifare_application_read (tags[i], mad, mad_nfcforum_aid, buffer, sizeof(buffer), mifare_classic_nfcforum_public_key_a, MFC_KEY_A)) != -1) {
-			uint8_t tlv_type;
-			uint16_t tlv_data_len;
-			uint8_t * tlv_data;
-			uint8_t * pbuffer = buffer;
-decode_tlv:
-			tlv_data = tlv_decode (pbuffer, &tlv_type, &tlv_data_len);
-			switch (tlv_type) {
-			    case 0x00:
-				fprintf (message_stream, "NFC Forum application contains a \"NULL TLV\", Skipping...\n");	// According to [ANNFC1K4K], we skip this Tag to read further TLV blocks.
-				pbuffer += tlv_record_length(pbuffer, NULL, NULL);
-				if (pbuffer >= buffer + sizeof(buffer)) {
-					error = EXIT_FAILURE;
-					goto error;
-				}
-				goto decode_tlv;
-				break;
-			    case 0x03:
-				fprintf (message_stream, "NFC Forum application contains a \"NDEF Message TLV\".\n");
-				break;
-			    case 0xFD:
-				fprintf (message_stream, "NFC Forum application contains a \"Proprietary TLV\", Skipping...\n");	// According to [ANNFC1K4K], we can skip this TLV to read further TLV blocks.
-				pbuffer += tlv_record_length(pbuffer, NULL, NULL);
-				if (pbuffer >= buffer + sizeof(buffer)) {
-					error = EXIT_FAILURE;
-					goto error;
-				}
-				goto decode_tlv;
-				break;
-			    case 0xFE:
-				fprintf (stderr, "NFC Forum application contains a \"Terminator TLV\", no available data.\n");
-				error = EXIT_FAILURE;
-				goto error;
-				break;
-			    default:
-				fprintf (stderr, "NFC Forum application contains an invalid TLV.\n");
-				error = EXIT_FAILURE;
-				goto error;
-				break;
-			}
-			if (fwrite (tlv_data, 1, tlv_data_len, ndef_stream) != tlv_data_len) {
-			    fprintf (stderr, "Could not write to file.\n");
+	    if ((mad = mad_read (tags[i]))) {
+		// Dump the NFCForum application using MAD information
+		uint8_t buffer[4096];
+		ssize_t len;
+		if ((len = mifare_application_read (tags[i], mad, mad_nfcforum_aid, buffer, sizeof(buffer), mifare_classic_nfcforum_public_key_a, MFC_KEY_A)) != -1) {
+		    uint8_t tlv_type;
+		    uint16_t tlv_data_len;
+		    uint8_t * tlv_data;
+		    uint8_t * pbuffer = buffer;
+		    decode_tlv:
+		    tlv_data = tlv_decode (pbuffer, &tlv_type, &tlv_data_len);
+		    switch (tlv_type) {
+		    case 0x00:
+			fprintf (message_stream, "NFC Forum application contains a \"NULL TLV\", Skipping...\n");	// According to [ANNFC1K4K], we skip this Tag to read further TLV blocks.
+			pbuffer += tlv_record_length(pbuffer, NULL, NULL);
+			if (pbuffer >= buffer + sizeof(buffer)) {
 			    error = EXIT_FAILURE;
 			    goto error;
 			}
-			free (tlv_data);
-		    } else {
-			fprintf (stderr, "No NFC Forum application.\n");
+			goto decode_tlv;
+			break;
+		    case 0x03:
+			fprintf (message_stream, "NFC Forum application contains a \"NDEF Message TLV\".\n");
+			break;
+		    case 0xFD:
+			fprintf (message_stream, "NFC Forum application contains a \"Proprietary TLV\", Skipping...\n");	// According to [ANNFC1K4K], we can skip this TLV to read further TLV blocks.
+			pbuffer += tlv_record_length(pbuffer, NULL, NULL);
+			if (pbuffer >= buffer + sizeof(buffer)) {
+			    error = EXIT_FAILURE;
+			    goto error;
+			}
+			goto decode_tlv;
+			break;
+		    case 0xFE:
+			fprintf (stderr, "NFC Forum application contains a \"Terminator TLV\", no available data.\n");
+			error = EXIT_FAILURE;
+			goto error;
+			break;
+		    default:
+			fprintf (stderr, "NFC Forum application contains an invalid TLV.\n");
+			error = EXIT_FAILURE;
+			goto error;
+			break;
+		    }
+		    if (fwrite (tlv_data, 1, tlv_data_len, ndef_stream) != tlv_data_len) {
+			fprintf (stderr, "Could not write to file.\n");
 			error = EXIT_FAILURE;
 			goto error;
 		    }
+		    free (tlv_data);
 		} else {
-		    fprintf (stderr, "No MAD detected.\n");
+		    fprintf (stderr, "No NFC Forum application.\n");
 		    error = EXIT_FAILURE;
 		    goto error;
 		}
-		free (mad);
+	    } else {
+		fprintf (stderr, "No MAD detected.\n");
+		error = EXIT_FAILURE;
+		goto error;
 	    }
-
-error:
-	    free (tag_uid);
+	    free (mad);
 	}
-	fclose (ndef_stream);
-	freefare_free_tags (tags);
-	nfc_close (device);
+
+	error:
+	free (tag_uid);
     }
+    fclose (ndef_stream);
+    freefare_free_tags (tags);
   
-    nfc_exit (context);
+    freefare_exit(ctx);
     exit (error);
 }

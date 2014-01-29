@@ -23,8 +23,7 @@
 
 #include "mifare_desfire_fixture.h"
 
-static nfc_context *context;
-static nfc_device *device = NULL;
+FreefareContext ctx = NULL;
 static MifareTag *tags = NULL;
 MifareTag tag = NULL;
 
@@ -32,48 +31,34 @@ void
 cut_setup (void)
 {
   int res;
-  nfc_connstring devices[8];
-  size_t device_count;
   
-  nfc_init (&context);
-  cut_assert_not_null (context, cut_message ("Unable to init libnfc (malloc)"));
+  ctx = freefare_init(FREEFARE_FLAG_READER_ALL);
+  cut_assert_not_null (ctx, cut_message ("Unable to init libfreefare"));
 
-  device_count = nfc_list_devices (context, devices, 8);
-  if (device_count <= 0)
-    cut_omit ("No device found");
+  tags = freefare_tags_get (ctx, DESFIRE);
+  cut_assert_not_null (tags, cut_message ("freefare_tags_get() failed"));
 
-  for (size_t i = 0; i < device_count; i++) {
-
-    device = nfc_open (context, devices[i]);
-    if (!device) 
-      cut_omit ("nfc_open() failed.");
-
-    tags = freefare_get_tags (device);
-    cut_assert_not_null (tags, cut_message ("freefare_get_tags() failed"));
-
-    tag = NULL;
-    for (int i=0; tags[i]; i++) {
+  tag = NULL;
+  for (int i=0; tags[i]; i++) {
       if (freefare_get_tag_type(tags[i]) == DESFIRE) {
-        tag = tags[i];
-        res = mifare_desfire_connect (tag);
-        cut_assert_equal_int (0, res, cut_message ("mifare_desfire_connect() failed"));
+	  tag = tags[i];
+	  res = mifare_desfire_connect (tag);
+	  cut_assert_equal_int (0, res, cut_message ("mifare_desfire_connect() failed"));
 
-        struct mifare_desfire_version_info version_info;
-        res = mifare_desfire_get_version (tag, &version_info);
-        cut_assert_equal_int (0, res, cut_message ("mifare_desfire_get_version"));
+	  struct mifare_desfire_version_info version_info;
+	  res = mifare_desfire_get_version (tag, &version_info);
+	  cut_assert_equal_int (0, res, cut_message ("mifare_desfire_get_version"));
 
-        if (version_info.hardware.storage_size < 0x18) {
-          cut_omit ("DESFire tests require at least a 4K card");
-        }
+	  if (version_info.hardware.storage_size < 0x18) {
+	      cut_omit ("DESFire tests require at least a 4K card");
+	  }
 
-        return;
+	  return;
       }
-    }
-    nfc_close (device);
-    device = NULL;
-    freefare_free_tags (tags);
-    tags = NULL;
   }
+  freefare_free_tags (tags);
+  tags = NULL;
+
   cut_omit ("No MIFARE DESFire tag on NFC device");
 }
 
@@ -88,9 +73,7 @@ cut_teardown (void)
       tags = NULL;
   }
 
-  if (device)
-      nfc_close (device);
-  
-  nfc_exit (context);
+  if (ctx)
+      freefare_exit(ctx);
 }
 

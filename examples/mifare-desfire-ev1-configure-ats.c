@@ -55,7 +55,6 @@ main(int argc, char *argv[])
 {
     int ch;
     int error = EXIT_SUCCESS;
-    nfc_device *device = NULL;
     MifareTag *tags = NULL;
 
     while ((ch = getopt (argc, argv, "hyK:")) != -1) {
@@ -86,98 +85,80 @@ main(int argc, char *argv[])
     }
     // Remaining args, if any, are in argv[optind .. (argc-1)]
 
-    nfc_connstring devices[8];
-    size_t device_count;
+    FreefareContext ctx = freefare_init(FREEFARE_FLAG_READER_ALL);
+    if (ctx == NULL)
+	errx(EXIT_FAILURE, "Unable to init libfreefare");
 
-    nfc_context *context;
-    nfc_init (&context);
-    if (context == NULL)
-	errx(EXIT_FAILURE, "Unable to init libnfc (malloc)");
+    tags = freefare_tags_get (ctx, DESFIRE);
+    if (!tags) {
+	freefare_exit(ctx);
+	errx (EXIT_FAILURE, "Error listing Mifare DESFire tags.");
+    }
 
-    device_count = nfc_list_devices (context, devices, 8);
-    if (device_count <= 0)
-	errx (EXIT_FAILURE, "No NFC device found.");
+    for (int i = 0; (!error) && tags[i]; i++) {
+	if (DESFIRE != freefare_get_tag_type (tags[i]))
+	    continue;
 
-    for (size_t d = 0; (!error) && (d < device_count); d++) {
-        device = nfc_open (context, devices[d]);
-        if (!device) {
-            warnx ("nfc_open() failed.");
-            error = EXIT_FAILURE;
-            continue;
-        }
+	char *tag_uid = freefare_get_tag_uid (tags[i]);
+	char buffer[BUFSIZ];
+	int res;
 
-	tags = freefare_get_tags (device);
-	if (!tags) {
-	    nfc_close (device);
-	    errx (EXIT_FAILURE, "Error listing Mifare DESFire tags.");
+	res = mifare_desfire_connect (tags[i]);
+	if (res < 0) {
+	    warnx ("Can't connect to Mifare DESFire target.");
+	    error = EXIT_FAILURE;
+	    break;
 	}
 
-	for (int i = 0; (!error) && tags[i]; i++) {
-	    if (DESFIRE != freefare_get_tag_type (tags[i]))
-		continue;
+	// Make sure we've at least an EV1 version
+	struct mifare_desfire_version_info info;
+	res = mifare_desfire_get_version (tags[i], &info);
+	if (res < 0) {
+	    freefare_perror (tags[i], "mifare_desfire_get_version");
+	    error = 1;
+	    break;
+	}
+	if (info.software.version_major < 1) {
+	    warnx ("Found old DESFire, skipping");
+	    continue;
+	}
+	printf ("Found %s with UID %s. ", freefare_get_tag_friendly_name (tags[i]), tag_uid);
+	bool do_it = true;
 
-	    char *tag_uid = freefare_get_tag_uid (tags[i]);
-	    char buffer[BUFSIZ];
-	    int res;
+	if (configure_options.interactive) {
+	    printf ("Change ATS? [yN] ");
+	    fgets (buffer, BUFSIZ, stdin);
+	    do_it = ((buffer[0] == 'y') || (buffer[0] == 'Y'));
+	} else {
+	    printf ("\n");
+	}
 
-	    res = mifare_desfire_connect (tags[i]);
+	if (do_it) {
+
+	    MifareDESFireKey key_picc = mifare_desfire_des_key_new_with_version (key_data_picc);
+	    res = mifare_desfire_authenticate (tags[i], 0, key_picc);
 	    if (res < 0) {
-		warnx ("Can't connect to Mifare DESFire target.");
+		freefare_perror (tags[i], "mifare_desfire_authenticate");
+		error = EXIT_FAILURE;
+		break;
+	    }
+	    mifare_desfire_key_free (key_picc);
+
+	    res = mifare_desfire_set_ats (tags[i], new_ats);
+	    if (res < 0) {
+		freefare_perror (tags[i], "mifare_desfire_set_ats");
 		error = EXIT_FAILURE;
 		break;
 	    }
 
-	    // Make sure we've at least an EV1 version
-	    struct mifare_desfire_version_info info;
-	    res = mifare_desfire_get_version (tags[i], &info);
-	    if (res < 0) {
-		freefare_perror (tags[i], "mifare_desfire_get_version");
-		error = 1;
-		break;
-	    }
-	    if (info.software.version_major < 1) {
-		warnx ("Found old DESFire, skipping");
-		continue;
-	    }
-	    printf ("Found %s with UID %s. ", freefare_get_tag_friendly_name (tags[i]), tag_uid);
-	    bool do_it = true;
-
-	    if (configure_options.interactive) {
-		printf ("Change ATS? [yN] ");
-		fgets (buffer, BUFSIZ, stdin);
-		do_it = ((buffer[0] == 'y') || (buffer[0] == 'Y'));
-	    } else {
-		printf ("\n");
-	    }
-
-	    if (do_it) {
-
-		MifareDESFireKey key_picc = mifare_desfire_des_key_new_with_version (key_data_picc);
-		res = mifare_desfire_authenticate (tags[i], 0, key_picc);
-		if (res < 0) {
-		    freefare_perror (tags[i], "mifare_desfire_authenticate");
-		    error = EXIT_FAILURE;
-		    break;
-		}
-		mifare_desfire_key_free (key_picc);
-
-		res = mifare_desfire_set_ats (tags[i], new_ats);
-		if (res < 0) {
-		    freefare_perror (tags[i], "mifare_desfire_set_ats");
-		    error = EXIT_FAILURE;
-		    break;
-		}
-
-	    }
-
-	    mifare_desfire_disconnect (tags[i]);
-	    free (tag_uid);
 	}
 
-	freefare_free_tags (tags);
-	nfc_close (device);
+	mifare_desfire_disconnect (tags[i]);
+	free (tag_uid);
     }
-    nfc_exit (context);
+
+    freefare_free_tags (tags);
+    freefare_exit(ctx);
     exit (error);
 } /* main() */
 

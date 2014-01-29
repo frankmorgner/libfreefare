@@ -1445,6 +1445,7 @@ MifareTag
 freefare_tag_first (FreefareContext ctx, enum mifare_tag_type tag_type)
 {
     if(!ctx) return NULL;
+    ctx->enumeration_state.phase = FREEFARE_ENUMERATION_PHASE_NONE;
     return _freefare_tag_first(ctx, &(ctx->enumeration_state), tag_type);
 }
 MifareTag

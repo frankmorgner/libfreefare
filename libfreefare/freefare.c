@@ -423,6 +423,8 @@ _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint3
     /*
      * Initialize pcsc specific fields
      */
+    result->pcsc.temp_connect = 0;
+    result->pcsc.last_error = 0;
     result->pcsc.reader_device_handle = device_handle;
     result->pcsc.share_mode = share_mode;
     result->reader = reader_fns;

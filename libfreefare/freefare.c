@@ -137,7 +137,8 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
     return NULL;
 }
 
-static MifareTag _freefare_tag_allocate(FreefareContext ctx, FreefareFlags flags, const struct supported_tag *tag_info)
+static MifareTag
+_freefare_tag_allocate(FreefareContext ctx, FreefareFlags flags, const struct supported_tag *tag_info)
 {
     if(!ctx || !tag_info) {
 	return NULL;
@@ -183,7 +184,8 @@ static MifareTag _freefare_tag_allocate(FreefareContext ctx, FreefareFlags flags
  * TODO: Currently only determines the tag type. Does not correctly account
  * for multiple identity tags (e.g. SmartMX with included Classic emulation).
  */
-static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
+static const struct supported_tag *
+_libnfc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
 {
     /* Ensure the target is supported */
     for (size_t i = 0; i < sizeof (supported_tags) / sizeof (struct supported_tag); i++) {
@@ -203,7 +205,8 @@ static const struct supported_tag *_libnfc_tag_type(FreefareContext ctx, Freefar
     return NULL;
 }
 
-static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
+static MifareTag
+_libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc_iso14443a_info info, nfc_modulation modulation, enum mifare_tag_type tag_type)
 {
 
     if(!ctx || !ctx->reader_devices[device_handle]) {
@@ -245,7 +248,8 @@ static MifareTag _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int d
     return result;
 }
 
-static void _libnfc_tag_free(MifareTag tag)
+static void
+_libnfc_tag_free(MifareTag tag)
 {
     if(!tag || !tag->ctx) {
 	return;
@@ -257,24 +261,28 @@ static void _libnfc_tag_free(MifareTag tag)
     _reader_device_free(tag->ctx->reader_devices + tag->libnfc.reader_device_handle);
 }
 
-static int _libnfc_connect(MifareTag tag)
+static int
+_libnfc_connect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
     return nfc_initiator_select_passive_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, tag->libnfc.modulation, tag->libnfc.info.abtUid, tag->libnfc.info.szUidLen, &tag->libnfc.pnti);
 }
 
-static int _libnfc_disconnect(MifareTag tag)
+static int
+_libnfc_disconnect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
     return nfc_initiator_deselect_target (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc);
 }
 
-static int _libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
+static int
+_libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
     return nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, send, send_length, recv, recv_length, timeout);
 }
 
-static const struct supported_tag *_pcsc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, uint32_t share_mode, enum mifare_tag_type tag_type)
+static const struct supported_tag *
+_pcsc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, uint32_t share_mode, enum mifare_tag_type tag_type)
 {
     if(!ctx || !device) {
 	return NULL;
@@ -385,7 +393,8 @@ static const struct supported_tag *_pcsc_tag_type(FreefareContext ctx, FreefareF
     return NULL;
 }
 
-static MifareTag _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint32_t share_mode, enum mifare_tag_type tag_type)
+static MifareTag
+_pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint32_t share_mode, enum mifare_tag_type tag_type)
 {
     if(!ctx || !ctx->reader_devices[device_handle]) {
 	return NULL;
@@ -426,7 +435,8 @@ static MifareTag _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int dev
     return result;
 }
 
-static void _pcsc_tag_free(MifareTag tag)
+static void
+_pcsc_tag_free(MifareTag tag)
 {
     if(!tag || !tag->ctx) {
 	return;
@@ -439,7 +449,8 @@ static void _pcsc_tag_free(MifareTag tag)
 }
 
 
-static int _pcsc_connect(MifareTag tag)
+static int
+_pcsc_connect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
     struct freefare_reader_device *rd = tag->ctx->reader_devices[tag->pcsc.reader_device_handle];
@@ -451,7 +462,8 @@ static int _pcsc_connect(MifareTag tag)
     return rv == SCARD_S_SUCCESS;
 }
 
-static int _pcsc_disconnect(MifareTag tag)
+static int
+_pcsc_disconnect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
     DWORD disposition = SCARD_RESET_CARD;
@@ -462,7 +474,8 @@ static int _pcsc_disconnect(MifareTag tag)
     return rv == SCARD_S_SUCCESS;
 }
 
-static int _pcsc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
+static int
+_pcsc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
     const SCARD_IO_REQUEST *send_pci;
     SCARD_IO_REQUEST recv_pci;
@@ -677,7 +690,7 @@ freefare_free_tag (MifareTag tag)
     }
 }
 
-const char *
+static const char *
 _libnfc_strerror(MifareTag tag)
 {
     if(!tag) {
@@ -691,7 +704,7 @@ _libnfc_strerror(MifareTag tag)
     return NULL;
 }
 
-const char *
+static const char *
 _pcsc_strerror(MifareTag tag)
 {
     return NULL;
@@ -751,7 +764,8 @@ freefare_free_tags (MifareTag *tags)
 }
 
 
-static struct freefare_reader_context *_libnfc_context_open(FreefareFlags flags)
+static struct freefare_reader_context *
+_libnfc_context_open(FreefareFlags flags)
 {
     struct freefare_reader_context *result = calloc(1, sizeof(*result));
     if(!result) {
@@ -763,7 +777,8 @@ static struct freefare_reader_context *_libnfc_context_open(FreefareFlags flags)
     return result;
 }
 
-static void _libnfc_context_free(struct freefare_reader_context *context)
+static void
+_libnfc_context_free(struct freefare_reader_context *context)
 {
     if(!context) {
 	return;
@@ -774,7 +789,8 @@ static void _libnfc_context_free(struct freefare_reader_context *context)
     free(context);
 }
 
-static struct freefare_reader_device *_libnfc_device_open(struct freefare_reader_context *context, nfc_connstring connstring, FreefareFlags flags)
+static struct freefare_reader_device *
+_libnfc_device_open(struct freefare_reader_context *context, nfc_connstring connstring, FreefareFlags flags)
 {
     if(!context || !(context->flags & FREEFARE_FLAG_READER_LIBNFC)) {
 	return NULL;
@@ -804,7 +820,8 @@ static struct freefare_reader_device *_libnfc_device_open(struct freefare_reader
     return result;
 }
 
-static void _libnfc_device_free(struct freefare_reader_device *device)
+static void
+_libnfc_device_free(struct freefare_reader_device *device)
 {
     if(!device) {
 	return;
@@ -815,7 +832,8 @@ static void _libnfc_device_free(struct freefare_reader_device *device)
     free(device);
 }
 
-static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
+static int
+_libnfc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
 {
     if(!ctx || !ctx->reader_devices[device_handle]) {
 	return -1;
@@ -878,7 +896,8 @@ static int _libnfc_enumerate_device(FreefareContext ctx, int device_handle, stru
  * is persisted into ctx.
  * It's written in a slightly complicated way to allow return and resume after a tag detection
  */
-static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *context, struct freefare_enumeration_state *state, MifareTag *result)
+static int
+_libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *context, struct freefare_enumeration_state *state, MifareTag *result)
 {
     if(!ctx || !context || !state || !result) {
 	return -1;
@@ -944,7 +963,8 @@ static int _libnfc_enumerate_context(FreefareContext ctx, struct freefare_reader
     return 0;
 }
 
-static struct freefare_reader_context *_pcsc_context_open(FreefareFlags flags)
+static struct freefare_reader_context *
+_pcsc_context_open(FreefareFlags flags)
 {
     struct freefare_reader_context *result = calloc(1, sizeof(*result));
     if(!result) {
@@ -961,7 +981,8 @@ static struct freefare_reader_context *_pcsc_context_open(FreefareFlags flags)
     return result;
 }
 
-static void _pcsc_context_free(struct freefare_reader_context *context)
+static void
+_pcsc_context_free(struct freefare_reader_context *context)
 {
     if(!context) {
 	return;
@@ -972,7 +993,8 @@ static void _pcsc_context_free(struct freefare_reader_context *context)
     free(context);
 }
 
-static struct freefare_reader_device *_pcsc_device_open(struct freefare_reader_context *context, const char *device_name, FreefareFlags flags)
+static struct freefare_reader_device *
+_pcsc_device_open(struct freefare_reader_context *context, const char *device_name, FreefareFlags flags)
 {
     if(!context || !(context->flags & FREEFARE_FLAG_READER_PCSC)) {
 	return NULL;
@@ -997,7 +1019,8 @@ static struct freefare_reader_device *_pcsc_device_open(struct freefare_reader_c
 
 }
 
-static void _pcsc_device_free(struct freefare_reader_device *device)
+static void
+_pcsc_device_free(struct freefare_reader_device *device)
 {
     if(!device) {
 	return;
@@ -1008,7 +1031,8 @@ static void _pcsc_device_free(struct freefare_reader_device *device)
     free(device);
 }
 
-static int _pcsc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
+static int
+_pcsc_enumerate_device(FreefareContext ctx, int device_handle, struct freefare_enumeration_state *state, MifareTag *result)
 {
     if(!ctx || !ctx->reader_devices[device_handle]) {
 	return -1;
@@ -1027,7 +1051,8 @@ static int _pcsc_enumerate_device(FreefareContext ctx, int device_handle, struct
     return 0;
 }
 
-static int _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *context, struct freefare_enumeration_state *state, MifareTag *result)
+static int
+_pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_context *context, struct freefare_enumeration_state *state, MifareTag *result)
 {
     if(!ctx || !context || !state || !result) {
 	return -1;
@@ -1106,7 +1131,8 @@ static int _pcsc_enumerate_context(FreefareContext ctx, struct freefare_reader_c
     return 0;
 }
 
-static int _embiggen_array(void **array, size_t *array_length, size_t element_size, size_t min_elements)
+static int
+_embiggen_array(void **array, size_t *array_length, size_t element_size, size_t min_elements)
 {
     if(!array || !array_length) {
 	return -1;
@@ -1130,7 +1156,8 @@ static int _embiggen_array(void **array, size_t *array_length, size_t element_si
     return 0;
 }
 
-static int _array_store(void ***array, size_t *array_length, size_t element_size, void *new_element)
+static int
+_array_store(void ***array, size_t *array_length, size_t element_size, void *new_element)
 {
     if(!array || !array_length) {
 	return -1;
@@ -1167,7 +1194,8 @@ static int _array_store(void ***array, size_t *array_length, size_t element_size
     return -1;
 }
 
-static int _reader_context_store(struct freefare_context *ctx, struct freefare_reader_context *reader_context)
+static int
+_reader_context_store(struct freefare_context *ctx, struct freefare_reader_context *reader_context)
 {
     if(!ctx || !reader_context) {
 	return -1;
@@ -1176,7 +1204,8 @@ static int _reader_context_store(struct freefare_context *ctx, struct freefare_r
     return _array_store((void***)&ctx->reader_contexts, &ctx->reader_contexts_length, sizeof(ctx->reader_contexts[0]), reader_context);
 }
 
-static int _reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device)
+static int
+_reader_device_store(struct freefare_context *ctx, struct freefare_reader_device *reader_device)
 {
     if(!ctx || !reader_device) {
 	return -1;
@@ -1189,7 +1218,8 @@ static int _reader_device_store(struct freefare_context *ctx, struct freefare_re
  * Allocate a new library context, possibly initialize lower-level
  * reader library connections
  */
-FreefareContext	 freefare_init (FreefareFlags flags)
+FreefareContext
+freefare_init (FreefareFlags flags)
 {
     struct freefare_context *result = calloc(1, sizeof(*result));
     if(!result) {
@@ -1244,7 +1274,8 @@ abort:
     return NULL;
 }
 
-MifareTag _freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_state *state)
+static MifareTag
+_freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_state *state)
 {
     if(!ctx || !state) {
 	return NULL;
@@ -1348,7 +1379,8 @@ MifareTag _freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_s
     return result;
 }
 
-MifareTag _freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_state *state, enum mifare_tag_type tag_type)
+static MifareTag
+_freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_state *state, enum mifare_tag_type tag_type)
 {
     if(!ctx || !state) {
 	return NULL;
@@ -1385,18 +1417,21 @@ MifareTag _freefare_tag_first (FreefareContext ctx, struct freefare_enumeration_
     return _freefare_tag_next(ctx, state);
 }
 
-MifareTag freefare_tag_first (FreefareContext ctx, enum mifare_tag_type tag_type)
+MifareTag
+freefare_tag_first (FreefareContext ctx, enum mifare_tag_type tag_type)
 {
     if(!ctx) return NULL;
     return _freefare_tag_first(ctx, &(ctx->enumeration_state), tag_type);
 }
-MifareTag freefare_tag_next (FreefareContext ctx)
+MifareTag
+freefare_tag_next (FreefareContext ctx)
 {
     if(!ctx) return NULL;
     return _freefare_tag_next(ctx, &(ctx->enumeration_state));
 }
 
-MifareTag *_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state)
+static MifareTag *
+_freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type, struct freefare_enumeration_state *state)
 {
     MifareTag *result = NULL;
     size_t result_length = 0;
@@ -1425,7 +1460,8 @@ abort:
 
 }
 
-MifareTag *freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type)
+MifareTag *
+freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type)
 {
     /*
      * Use a tag_first/tag_next loop, but store state in a local variable
@@ -1437,7 +1473,8 @@ MifareTag *freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type
     return _freefare_tags_get(ctx, tag_type, &state);
 }
 
-static void _reader_context_free(struct freefare_reader_context **conptr)
+static void
+_reader_context_free(struct freefare_reader_context **conptr)
 {
     if(!conptr || !*conptr) {
 	return;
@@ -1452,7 +1489,8 @@ static void _reader_context_free(struct freefare_reader_context **conptr)
     }
 }
 
-static void _reader_device_free(struct freefare_reader_device **devptr)
+static void
+_reader_device_free(struct freefare_reader_device **devptr)
 {
     if(!devptr || !*devptr) {
 	return;
@@ -1473,7 +1511,8 @@ static void _reader_device_free(struct freefare_reader_device **devptr)
     }
 }
 
-void freefare_exit (FreefareContext ctx)
+void
+freefare_exit (FreefareContext ctx)
 {
     if(!ctx) {
 	ctx = implicit_context;
@@ -1542,7 +1581,8 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 	},
 };
 
-static const struct supported_reader *_reader_driver_lookup(FreefareFlags identifying_flag)
+static const struct supported_reader *
+_reader_driver_lookup(FreefareFlags identifying_flag)
 {
     for(size_t i=0; i<sizeof(SUPPORTED_READERS)/sizeof(SUPPORTED_READERS[0]); i++) {
 	if( (SUPPORTED_READERS[i].identifying_flag & identifying_flag) == identifying_flag) {

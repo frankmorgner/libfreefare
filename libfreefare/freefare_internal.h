@@ -212,6 +212,7 @@ struct mifare_tag {
 	SCARDHANDLE card;
 	DWORD active_protocol;
 	unsigned int temp_connect:1;
+	LONG last_error;
     } pcsc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;

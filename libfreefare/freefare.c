@@ -458,8 +458,8 @@ _pcsc_connect(MifareTag tag)
     if(tag->pcsc.temp_connect) {
 	share_mode = SCARD_SHARE_SHARED;
     }
-    LONG rv = SCardConnect(rd->pcsc.context, rd->pcsc.device_name, share_mode, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &tag->pcsc.card, &tag->pcsc.active_protocol);
-    return rv == SCARD_S_SUCCESS;
+    tag->pcsc.last_error = SCardConnect(rd->pcsc.context, rd->pcsc.device_name, share_mode, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &tag->pcsc.card, &tag->pcsc.active_protocol);
+    return tag->pcsc.last_error == SCARD_S_SUCCESS;
 }
 
 static int
@@ -470,8 +470,8 @@ _pcsc_disconnect(MifareTag tag)
     if(tag->pcsc.temp_connect) {
 	disposition = SCARD_LEAVE_CARD;
     }
-    LONG rv = SCardDisconnect(tag->pcsc.card, disposition);
-    return rv == SCARD_S_SUCCESS;
+    tag->pcsc.last_error = SCardDisconnect(tag->pcsc.card, disposition);
+    return tag->pcsc.last_error == SCARD_S_SUCCESS;
 }
 
 static int
@@ -491,9 +491,9 @@ _pcsc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, u
     DWORD recv_length_ = recv_length;
     memcpy(&recv_pci, send_pci, sizeof(recv_pci));
 
-    LONG result = SCardTransmit(tag->pcsc.card, send_pci, send, send_length_, &recv_pci, recv, &recv_length_);
+    tag->pcsc.last_error = SCardTransmit(tag->pcsc.card, send_pci, send, send_length_, &recv_pci, recv, &recv_length_);
 
-    if(result != SCARD_S_SUCCESS) {
+    if(tag->pcsc.last_error != SCARD_S_SUCCESS) {
 	return -1;
     } else {
 	return recv_length_;
@@ -707,7 +707,10 @@ _libnfc_strerror(MifareTag tag)
 static const char *
 _pcsc_strerror(MifareTag tag)
 {
-    return NULL;
+    if(!tag) {
+	return NULL;
+    }
+    return pcsc_stringify_error(tag->pcsc.last_error);
 }
 
 const char *

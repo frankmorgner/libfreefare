@@ -84,12 +84,6 @@ typedef union {
 	char _dummy[384];
 } FreefareReaderTag;
 
-static void __attribute__((unused)) _build_time_check(void) {
-    BUILD_BUG_ON(sizeof(FreefareReaderContext) > sizeof(((FreefareReaderContext*)(0))->_dummy));
-    BUILD_BUG_ON(sizeof(FreefareReaderDevice) > sizeof(((FreefareReaderDevice*)(0))->_dummy));
-    BUILD_BUG_ON(sizeof(FreefareReaderTag) > sizeof(((FreefareReaderTag*)(0))->_dummy));
-}
-
 #define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
 #define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
 #define FREEFARE_TAG_LIBNFC(device, nai, modulation) (FreefareReaderTag){.libnfc = {device, nai, modulation}}

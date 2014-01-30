@@ -1271,6 +1271,16 @@ freefare_init (FreefareFlags flags)
 	}
     }
 
+    /*
+     * These tests statically check the size of the FreefareReader* structures
+     * to ensure that the addition of a new reader module doesn't run over the
+     * reserved space and keep the ABI constant.
+     */
+    BUILD_BUG_ON(sizeof(FreefareReaderContext) > sizeof(((FreefareReaderContext*)(0))->_dummy));
+    BUILD_BUG_ON(sizeof(FreefareReaderDevice) > sizeof(((FreefareReaderDevice*)(0))->_dummy));
+    BUILD_BUG_ON(sizeof(FreefareReaderTag) > sizeof(((FreefareReaderTag*)(0))->_dummy));
+
+
     return result;
 abort:
     freefare_exit(result);

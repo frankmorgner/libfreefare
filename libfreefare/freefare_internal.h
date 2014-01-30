@@ -194,7 +194,7 @@ struct supported_reader {
  * used directly (it's some kind of abstract class).  All members in this
  * structure are initialized by freefare_get_tags().
  *
- * Extra members in derived classes are initialized in the correpsonding
+ * Extra members in derived classes are initialized in the corresponding
  * mifare_*_connect() function.
  */
 struct mifare_tag {

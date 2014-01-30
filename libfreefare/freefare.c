@@ -238,6 +238,7 @@ _libnfc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, nfc
     result->libnfc.reader_device_handle = device_handle;
     result->libnfc.info = info;
     result->libnfc.modulation = modulation;
+    result->libnfc.tag_removed = 0;
     result->reader = reader_fns;
 
     /*
@@ -278,7 +279,19 @@ _libnfc_disconnect(MifareTag tag)
 static int
 _libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout)
 {
-    return nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, send, send_length, recv, recv_length, timeout);
+    if(!tag) return errno = EBADF, -1;
+    if(tag->libnfc.tag_removed) {
+	return errno = ENOLINK, -1;
+    }
+    int r = nfc_initiator_transceive_bytes (tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, send, send_length, recv, recv_length, timeout);
+    if(r < 0) {
+	if(nfc_device_get_last_error(tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc) == NFC_ERFTRANS) {
+	    /* Tag probably has been removed */
+	    tag->libnfc.tag_removed = 1;
+	    errno = ENOLINK;
+	}
+    }
+    return r;
 }
 
 static const struct supported_tag *

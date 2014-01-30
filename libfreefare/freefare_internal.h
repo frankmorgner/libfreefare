@@ -205,6 +205,7 @@ struct mifare_tag {
 	nfc_iso14443a_info info;
 	nfc_modulation modulation;
 	nfc_target pnti;
+	unsigned int tag_removed:1;
     } libnfc;
     struct {
 	int reader_device_handle;

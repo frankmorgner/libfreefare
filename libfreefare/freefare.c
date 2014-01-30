@@ -263,6 +263,31 @@ _libnfc_tag_free(MifareTag tag)
 }
 
 static int
+_libnfc_tag_status_get(MifareTag tag, FreefareTagStatus *status)
+{
+    if(!tag || !status || !tag->ctx || !tag->ctx->reader_devices[tag->libnfc.reader_device_handle]) {
+	return -1;
+    }
+
+    if(status->version == 1) {
+	if(!tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->internal) {
+	    status->data.v1.libnfc.reader_handle = tag->libnfc.reader_device_handle;
+	} else {
+	    status->data.v1.libnfc.reader_handle = -1;
+	}
+	status->data.v1.libnfc.device = tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc;
+	status->data.v1.libnfc.info = tag->libnfc.info;
+	status->data.v1.libnfc.modulation = tag->libnfc.modulation;
+	status->data.v1.libnfc.pnti = tag->libnfc.pnti;
+	status->data.v1.libnfc.tag_removed = tag->libnfc.tag_removed;
+
+	return 0;
+    } else {
+	return -1;
+    }
+}
+
+static int
 _libnfc_connect(MifareTag tag)
 {
     if(!tag) return errno = EBADF, -1;
@@ -463,6 +488,50 @@ _pcsc_tag_free(MifareTag tag)
     _reader_device_free(tag->ctx->reader_devices + tag->pcsc.reader_device_handle);
 }
 
+static int
+_pcsc_tag_status_get(MifareTag tag, FreefareTagStatus *status)
+{
+    if(!tag || !status || !tag->ctx || !tag->ctx->reader_devices[tag->pcsc.reader_device_handle]) {
+	return -1;
+    }
+
+    if(status->version == 1) {
+	if(!tag->ctx->reader_devices[tag->pcsc.reader_device_handle]->internal) {
+	    status->data.v1.pcsc.reader_handle = tag->pcsc.reader_device_handle;
+	} else {
+	    status->data.v1.pcsc.reader_handle = -1;
+	}
+	status->data.v1.pcsc.active_protocol = tag->pcsc.active_protocol;
+	status->data.v1.pcsc.card = tag->pcsc.card;
+	status->data.v1.pcsc.context = tag->ctx->reader_devices[tag->pcsc.reader_device_handle]->pcsc.context;
+	status->data.v1.pcsc.device_name = strdup(tag->ctx->reader_devices[tag->pcsc.reader_device_handle]->pcsc.device_name);
+	status->data.v1.pcsc.last_error = tag->pcsc.last_error;
+	status->data.v1.pcsc.share_mode = tag->pcsc.share_mode;
+
+	return (status->data.v1.pcsc.device_name == NULL) ? -1 : 0;
+    } else {
+	return -1;
+    }
+}
+
+static void
+_pcsc_tag_status_free(FreefareTagStatus *status)
+{
+    if(!status) {
+	return;
+    }
+
+    if(status->version == 1) {
+	if(status->data.v1.pcsc.device_name) {
+	    free(status->data.v1.pcsc.device_name);
+	    status->data.v1.pcsc.device_name = NULL;
+	}
+
+	return;
+    } else {
+	return;
+    }
+}
 
 static int
 _pcsc_connect(MifareTag tag)
@@ -1523,6 +1592,61 @@ freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type)
     return _freefare_tags_get(ctx, tag_type, &state);
 }
 
+FreefareTagStatus *
+freefare_tag_status_get(MifareTag tag, int status_version)
+{
+    if(!tag || !tag->ctx || !tag->reader) {
+	return NULL;;
+    }
+
+    if(status_version == 1) {
+	FreefareTagStatus *result = calloc(1, sizeof(*result));
+	if(!result) {
+	    return NULL;
+	}
+
+	result->version = status_version;
+	result->data.v1.ctx = tag->ctx;
+	result->data.v1.flags = tag->flags;
+
+	if(tag->reader->status_get) {
+	    if(tag->reader->status_get(tag, result) < 0) {
+		freefare_tag_status_free(result);
+		return NULL;
+	    }
+	}
+
+	return result;
+    } else {
+	return NULL;
+    }
+}
+
+void
+freefare_tag_status_free(FreefareTagStatus *status)
+{
+    if(!status) {
+	return;
+    }
+
+    if(status->version == 1) {
+	const struct supported_reader *readerfns = _reader_driver_lookup(status->data.v1.flags);
+	if(!readerfns) {
+	    return;
+	}
+
+	if(readerfns->status_free) {
+	    readerfns->status_free(status);
+	}
+
+	memset(status, 0, sizeof(*status));
+	free(status);
+    } else {
+	return;
+    }
+}
+
+
 static void
 _reader_context_free(struct freefare_reader_context **conptr)
 {
@@ -1621,7 +1745,8 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 		.strerror = _libnfc_strerror,
 		.connect = _libnfc_connect,
 		.disconnect = _libnfc_disconnect,
-		.transceive_bytes = _libnfc_transceive_bytes
+		.transceive_bytes = _libnfc_transceive_bytes,
+		.status_get = _libnfc_tag_status_get,
 	},
 	{FREEFARE_FLAG_READER_PCSC,
 		.tag_free = _pcsc_tag_free,
@@ -1629,7 +1754,9 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 		.strerror = _pcsc_strerror,
 		.connect = _pcsc_connect,
 		.disconnect = _pcsc_disconnect,
-		.transceive_bytes = _pcsc_transceive_bytes
+		.transceive_bytes = _pcsc_transceive_bytes,
+		.status_get = _pcsc_tag_status_get,
+		.status_free = _pcsc_tag_status_free,
 	},
 };
 

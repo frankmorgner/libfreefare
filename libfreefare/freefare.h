@@ -84,6 +84,33 @@ typedef union {
 	char _dummy[384];
 } FreefareReaderTag;
 
+typedef struct {
+    int version;
+    union {
+	struct FreefareTagStatus_v1 {
+	    FreefareContext ctx;
+	    FreefareFlags flags;
+	    struct {
+		int reader_handle;
+		nfc_device *device;
+		nfc_iso14443a_info info;
+		nfc_modulation modulation;
+		nfc_target pnti;
+		unsigned int tag_removed:1;
+	    } libnfc;
+	    struct {
+		int reader_handle;
+		SCARDCONTEXT context;
+		char *device_name;
+		uint32_t share_mode;
+		SCARDHANDLE card;
+		DWORD active_protocol;
+		LONG last_error;
+	    } pcsc;
+	} v1;
+    } data;
+} FreefareTagStatus;
+
 #define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
 #define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
 #define FREEFARE_TAG_LIBNFC(device, nai, modulation) (FreefareReaderTag){.libnfc = {device, nai, modulation}}
@@ -107,6 +134,9 @@ __attribute__((deprecated))
 MifareTag	*freefare_get_tags (nfc_device *device);
 __attribute__((deprecated))
 MifareTag	 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai);
+
+FreefareTagStatus *freefare_tag_status_get(MifareTag tag, int status_version);
+void		 freefare_tag_status_free(FreefareTagStatus *status);
 
 
 enum mifare_tag_type freefare_get_tag_type (MifareTag tag);

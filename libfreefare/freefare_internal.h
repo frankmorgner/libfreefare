@@ -186,6 +186,8 @@ struct supported_reader {
     int(*connect)(MifareTag tag);
     int(*disconnect)(MifareTag tag);
     int(*transceive_bytes)(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
+    int(*status_get)(MifareTag tag, FreefareTagStatus *status);
+    void(*status_free)(FreefareTagStatus *status);
 };
 
 

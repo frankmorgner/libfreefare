@@ -130,7 +130,9 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 	}
 
 	MifareTag result = _pcsc_tag_new(ctx, flags, slot, reader_tag.pcsc.share_mode, tag_type);
-	_reader_device_free(ctx->reader_devices + slot);
+	if(!result) {
+	    _reader_device_free(ctx->reader_devices + slot);
+	}
 	return result;
     }
 

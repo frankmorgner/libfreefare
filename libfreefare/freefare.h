@@ -65,6 +65,9 @@ typedef struct mifare_desfire_key *MifareDESFireKey;
 struct freefare_context;
 typedef struct freefare_context *FreefareContext;
 
+struct freefare_tag_wait_context;
+typedef struct freefare_tag_wait_context *FreefareTagWaitContext;
+
 typedef uint8_t MifareUltralightPageNumber;
 typedef unsigned char MifareUltralightPage[4];
 
@@ -75,12 +78,12 @@ typedef union {
 } FreefareReaderContext;
 typedef union {
     nfc_device *libnfc;
-    struct { SCARDCONTEXT context; char *device_name; } pcsc;
+    struct { SCARDCONTEXT context; const char *device_name; } pcsc;
     char _dummy[64];
 } FreefareReaderDevice;
 typedef union {
 	struct {nfc_device *device; nfc_iso14443a_info nai; nfc_modulation modulation;} libnfc;
-	struct {SCARDCONTEXT context; char *device_name; uint32_t share_mode; } pcsc;
+	struct {SCARDCONTEXT context; const char *device_name; uint32_t share_mode; } pcsc;
 	char _dummy[384];
 } FreefareReaderTag;
 
@@ -111,13 +114,32 @@ typedef struct {
     } data;
 } FreefareTagStatus;
 
-#define FREEFARE_CONTEXT_LIBNFC(ctx) (FreefareReaderContext){.libnfc = ctx}
-#define FREEFARE_DEVICE_LIBNFC(device) (FreefareReaderDevice){.libnfc = device}
-#define FREEFARE_TAG_LIBNFC(device, nai, modulation) (FreefareReaderTag){.libnfc = {device, nai, modulation}}
+typedef union {
+    struct {
+	uint8_t period;
+	int device_handle;
+    } libnfc;
+    struct {
+	int context_handle;
+	int device_handle;
+    } pcsc;
+    char _dummy[64];
+} FreefareTagWaitArgument;
 
-#define FREEFARE_CONTEXT_PCSC(ctx) (FreefareReaderContext){.pcsc = ctx}
-#define FREEFARE_DEVICE_PCSC(ctx, device_name) (FreefareReaderDevice){.pcsc = {ctx, device_name}}
-#define FREEFARE_TAG_PCSC(ctx, device_name, share_mode) (FreefareReaderTag){.pcsc = {ctx, device_name, share_mode}}
+#define FREEFARE_CONTEXT_LIBNFC(ctx)			(FreefareReaderContext){.libnfc = ctx}
+#define FREEFARE_DEVICE_LIBNFC(device)			(FreefareReaderDevice){.libnfc = device}
+#define FREEFARE_TAG_LIBNFC(device, nai, modulation)	(FreefareReaderTag){.libnfc = {device, nai, modulation}}
+
+#define FREEFARE_CONTEXT_PCSC(ctx)			(FreefareReaderContext){.pcsc = ctx}
+#define FREEFARE_DEVICE_PCSC(ctx, device_name)		(FreefareReaderDevice){.pcsc = {ctx, device_name}}
+#define FREEFARE_TAG_PCSC(ctx, device_name, share_mode)	(FreefareReaderTag){.pcsc = {ctx, device_name, share_mode}}
+
+#define FREEFARE_TAG_WAIT_LIBNFC(period, device_handle)	(FreefareTagWaitArgument){.libnfc = {period, device_handle}}
+#define FREEFARE_TAG_WAIT_LIBNFC_AUTO(period)		FREEFARE_TAG_WAIT_LIBNFC(period, -1)
+
+#define FREEFARE_TAG_WAIT_PCSC_CONTEXT(context_handle)	(FreefareTagWaitArgument){.pcsc = {context_handle, -1}}
+#define FREEFARE_TAG_WAIT_PCSC_DEVICE(device_handle)	(FreefareTagWaitArgument){.pcsc = {-1, device_handle}}
+#define FREEFARE_TAG_WAIT_PCSC_AUTO()			FREEFARE_TAG_WAIT_PCSC_CONTEXT(-1)
 
 FreefareContext	 freefare_init (FreefareFlags flags);
 int		 freefare_context_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderContext context);
@@ -134,6 +156,10 @@ __attribute__((deprecated))
 MifareTag	*freefare_get_tags (nfc_device *device);
 __attribute__((deprecated))
 MifareTag	 freefare_tag_new (nfc_device *device, nfc_iso14443a_info nai);
+
+FreefareTagWaitContext freefare_tag_wait_new(FreefareContext ctx, FreefareFlags flags, FreefareTagWaitArgument argument, enum mifare_tag_type tag_type);
+MifareTag	 freefare_tag_wait_next(FreefareTagWaitContext wait_context, int timeout);
+void		 freefare_tag_wait_free(FreefareTagWaitContext wait_context);
 
 FreefareTagStatus *freefare_tag_status_get(MifareTag tag, int status_version);
 void		 freefare_tag_status_free(FreefareTagStatus *status);

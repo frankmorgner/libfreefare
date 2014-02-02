@@ -1724,6 +1724,343 @@ freefare_exit (FreefareContext ctx)
 }
 
 /*
+ * Blocking tag detection API
+ */
+FreefareTagWaitContext
+freefare_tag_wait_new(FreefareContext ctx, FreefareFlags flags, FreefareTagWaitArgument argument, enum mifare_tag_type tag_type)
+{
+    if(!ctx) {
+	return NULL;
+    }
+
+    struct freefare_tag_wait_context *result = calloc(1, sizeof(*result));
+    if(!result) {
+	return NULL;
+    }
+
+    result->ctx = ctx;
+    result->flags = flags;
+    result->argument = argument;
+    result->tag_type = tag_type;
+
+    if(flags & FREEFARE_FLAG_READER_ALL) {
+	goto abort;
+    }
+
+    if( (flags & FREEFARE_FLAG_READER_LIBNFC) && (flags & FREEFARE_FLAG_READER_PCSC) ) {
+	goto abort;
+    }
+
+    if(!(flags & (FREEFARE_FLAG_READER_LIBNFC|FREEFARE_FLAG_READER_PCSC)) ) {
+	goto abort;
+    }
+
+    const struct supported_reader *readerfns = _reader_driver_lookup(flags);
+    if(!readerfns->wait_next) {
+	goto abort;
+    }
+
+    return result;
+
+abort:
+    if(result) {
+	freefare_tag_wait_free(result);
+    }
+    return NULL;
+}
+
+MifareTag
+freefare_tag_wait_next(FreefareTagWaitContext wait_context, int timeout)
+{
+    if(!wait_context) {
+	return NULL;
+    }
+
+    const struct supported_reader *readerfns = _reader_driver_lookup(wait_context->flags);
+    if(!readerfns->wait_next) {
+	return NULL;
+    }
+
+    return readerfns->wait_next(wait_context, timeout);
+}
+
+void
+freefare_tag_wait_free(FreefareTagWaitContext wait_context)
+{
+    if(!wait_context) {
+	return;
+    }
+
+    const struct supported_reader *readerfns = _reader_driver_lookup(wait_context->flags);
+    if(readerfns->wait_free) {
+	readerfns->wait_free(wait_context);
+    }
+
+    memset(wait_context, 0, sizeof(*wait_context));
+    free(wait_context);
+    return;
+}
+
+static void
+_pcsc_wait_context_clean(FreefareTagWaitContext wait_context, int clean_main, int clean_backup)
+{
+    if(!wait_context || !wait_context->ctx) {
+	return;
+    }
+
+    if(wait_context->pcsc.context_handle >= 0 &&
+	    wait_context->pcsc.context_handle < wait_context->ctx->reader_contexts_length &&
+	    wait_context->ctx->reader_contexts[wait_context->pcsc.context_handle]) {
+	if(wait_context->pcsc.reader_list) {
+	    SCardFreeMemory(wait_context->ctx->reader_contexts[wait_context->pcsc.context_handle]->pcsc, wait_context->pcsc.reader_list);
+	    wait_context->pcsc.reader_list = NULL;
+	}
+    }
+
+    if(clean_main) {
+	if(wait_context->pcsc.status) {
+	    for(int i=0; i<wait_context->pcsc.status_length; i++) {
+		free((void*)wait_context->pcsc.status[i].szReader);
+	    }
+	    free(wait_context->pcsc.status);
+	    wait_context->pcsc.status = NULL;
+	}
+
+	if(wait_context->pcsc.meta_status) {
+	    free(wait_context->pcsc.meta_status);
+	    wait_context->pcsc.meta_status = NULL;
+	}
+    }
+
+    if(clean_backup) {
+	if(wait_context->pcsc.status_backup) {
+	    for(int i=0; i<wait_context->pcsc.status_backup_length; i++) {
+		free((void*)wait_context->pcsc.status_backup[i].szReader);
+	    }
+	    free(wait_context->pcsc.status_backup);
+	    wait_context->pcsc.status_backup = NULL;
+	}
+
+	if(wait_context->pcsc.meta_status_backup) {
+	    free(wait_context->pcsc.meta_status_backup);
+	    wait_context->pcsc.meta_status_backup = NULL;
+	}
+    }
+}
+
+static const char *_PCSC_PNP_NOTIFICATION_READER_NAME = "\\\\?PnP?\\Notification";
+
+static int
+_pcsc_wait_list_build(FreefareTagWaitContext wait_context)
+{
+    /*
+     * Enumerate all readers, add the special PnP Notification reader, then use this to query the current status
+     */
+
+    wait_context->pcsc.meta_status_backup = wait_context->pcsc.meta_status;
+    wait_context->pcsc.status_backup = wait_context->pcsc.status;
+    wait_context->pcsc.status_backup_length = wait_context->pcsc.status_length;
+
+    wait_context->pcsc.meta_status = NULL;
+    wait_context->pcsc.status = NULL;
+    wait_context->pcsc.status_length = 0;
+
+    _pcsc_wait_context_clean(wait_context, 1, 0);
+
+    DWORD reader_list_length = SCARD_AUTOALLOCATE;
+    size_t readers_num = 0;
+    LONG rv = SCardListReaders(wait_context->ctx->reader_contexts[wait_context->pcsc.context_handle]->pcsc, NULL, (LPTSTR)&wait_context->pcsc.reader_list, &reader_list_length);
+    LPTSTR reader_name = NULL;
+
+    if(rv != SCARD_E_NO_READERS_AVAILABLE && rv != SCARD_S_SUCCESS) {
+	_pcsc_wait_context_clean(wait_context, 1, 1);
+	return -1;
+    }
+
+    if(rv == SCARD_E_NO_READERS_AVAILABLE) {
+	readers_num = 0;
+    } else {
+	reader_name = wait_context->pcsc.reader_list;
+	while(reader_name < wait_context->pcsc.reader_list + reader_list_length && reader_name[0] != 0) {
+	    reader_name += strlen(reader_name) + 1;
+	    readers_num++;
+	}
+    }
+
+    /*
+     * Allocate readers_num + 1 (for the PnP Notification virtual reader) slots
+     */
+    wait_context->pcsc.status = calloc(readers_num + 1, sizeof(*wait_context->pcsc.status));
+    if(!wait_context->pcsc.status) {
+	_pcsc_wait_context_clean(wait_context, 1, 1);
+	return -1;
+    }
+    wait_context->pcsc.meta_status = calloc(readers_num + 1, sizeof(*wait_context->pcsc.meta_status));
+    if(!wait_context->pcsc.meta_status) {
+	_pcsc_wait_context_clean(wait_context, 1, 1);
+	return -1;
+    }
+
+    wait_context->pcsc.status_length = 0;
+    reader_name = wait_context->pcsc.reader_list;
+    while(reader_name < wait_context->pcsc.reader_list + reader_list_length && reader_name[0] != 0) {
+	wait_context->pcsc.status[wait_context->pcsc.status_length].szReader = strdup(reader_name);
+	wait_context->pcsc.status[wait_context->pcsc.status_length].dwCurrentState = SCARD_STATE_UNAWARE;
+	if(!wait_context->pcsc.status[wait_context->pcsc.status_length].szReader) {
+	    _pcsc_wait_context_clean(wait_context, 1, 1);
+	    return -1;
+	}
+
+	if(wait_context->pcsc.status_backup && wait_context->pcsc.meta_status_backup) {
+	    /*
+	     * Copy old information over if present;
+	     */
+	    for(size_t old_reader = 0; old_reader < wait_context->pcsc.status_backup_length; old_reader++) {
+		if(strlen(wait_context->pcsc.status[wait_context->pcsc.status_length].szReader) == strlen(wait_context->pcsc.status_backup[old_reader].szReader) &&
+			strcmp(wait_context->pcsc.status[wait_context->pcsc.status_length].szReader, wait_context->pcsc.status_backup[old_reader].szReader) == 0) {
+		    wait_context->pcsc.status[wait_context->pcsc.status_length].dwCurrentState = wait_context->pcsc.status_backup[old_reader].dwCurrentState;
+		    wait_context->pcsc.meta_status[wait_context->pcsc.status_length] = wait_context->pcsc.meta_status_backup[old_reader];
+		    break;
+		}
+	    }
+	}
+
+	wait_context->pcsc.status_length++;
+	reader_name += strlen(reader_name) + 1;
+    }
+
+    wait_context->pcsc.status[wait_context->pcsc.status_length].szReader = strdup(_PCSC_PNP_NOTIFICATION_READER_NAME);
+    wait_context->pcsc.status[wait_context->pcsc.status_length].dwCurrentState = SCARD_STATE_UNAWARE;
+    if(!wait_context->pcsc.status[wait_context->pcsc.status_length].szReader) {
+	_pcsc_wait_context_clean(wait_context, 1, 1);
+	return -1;
+    }
+    wait_context->pcsc.status_length++;
+
+    _pcsc_wait_context_clean(wait_context, 0, 1);
+
+    return 0;
+}
+
+static MifareTag
+_pcsc_tag_wait_next(FreefareTagWaitContext wait_context, int timeout)
+{
+    if(!wait_context || !wait_context->ctx || !(wait_context->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return NULL;
+    }
+    FreefareContext ctx = wait_context->ctx;
+
+    if(!wait_context->pcsc.status) {
+	if(wait_context->argument.pcsc.context_handle == -1) {
+	    /*
+	     * Need to determine the context to operate on first.
+	     * Prefer internal context if available.
+	     */
+	    for(int i=0; i < ctx->reader_contexts_length; i++) {
+		if(!ctx->reader_contexts[i] || !(ctx->reader_contexts[i]->flags & FREEFARE_FLAG_READER_PCSC)) {
+		    continue;
+		}
+		if(ctx->reader_contexts[i]->internal) {
+		    wait_context->pcsc.context_handle = i;
+		    break;
+		}
+	    }
+
+	    if(wait_context->pcsc.context_handle == -1) {
+		for(int i=0; i < ctx->reader_contexts_length; i++) {
+		    if(!ctx->reader_contexts[i] || !(ctx->reader_contexts[i]->flags & FREEFARE_FLAG_READER_PCSC)) {
+			continue;
+		    }
+		    wait_context->pcsc.context_handle = i;
+		    break;
+		}
+	    }
+	} else {
+	    wait_context->pcsc.context_handle = wait_context->argument.pcsc.context_handle;
+	}
+    }
+
+    if(wait_context->pcsc.context_handle < 0 ||
+	    wait_context->pcsc.context_handle > ctx->reader_contexts_length ||
+	    !ctx->reader_contexts[wait_context->pcsc.context_handle] ||
+	    !(ctx->reader_contexts[wait_context->pcsc.context_handle]->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return NULL;
+    }
+
+    struct freefare_reader_context *context = ctx->reader_contexts[wait_context->pcsc.context_handle];
+
+    if(!wait_context->pcsc.status) {
+	if(_pcsc_wait_list_build(wait_context) < 0) {
+	    _pcsc_wait_context_clean(wait_context, 1, 1);
+	    return NULL;
+	}
+    }
+
+    if(timeout == 0) {
+	timeout = INFINITE;
+    }
+
+    while(1) {
+	LONG rv = SCardGetStatusChange(context->pcsc, timeout, wait_context->pcsc.status, wait_context->pcsc.status_length);
+	if(rv == SCARD_E_TIMEOUT) {
+	    return NULL;
+	} else if(rv != SCARD_S_SUCCESS) {
+	    _pcsc_wait_context_clean(wait_context, 1, 1);
+	    return NULL;
+	} else {
+	    MifareTag result = NULL;
+	    for(size_t i=0; i<wait_context->pcsc.status_length-1; i++) {
+		if( wait_context->pcsc.status[i].dwEventState & SCARD_STATE_PRESENT ) {
+		    if(!wait_context->pcsc.meta_status[i].tag_created) {
+			result = freefare_tag_new_ex(ctx, FREEFARE_FLAG_READER_PCSC, FREEFARE_TAG_PCSC(context->pcsc, wait_context->pcsc.status[i].szReader, FREEFARE_PCSC_DEFAULT_SHARE_MODE), wait_context->tag_type);
+			wait_context->pcsc.meta_status[i].tag_created = 1;
+		    }
+		} else {
+		    wait_context->pcsc.meta_status[i].tag_created = 0;
+		}
+
+		wait_context->pcsc.status[i].dwCurrentState = wait_context->pcsc.status[i].dwEventState;
+
+		if(result) {
+		    break;
+		}
+	    }
+
+	    if(result) {
+		return result;
+	    }
+
+	    if( (wait_context->pcsc.status[wait_context->pcsc.status_length-1].dwEventState & SCARD_STATE_CHANGED) ) {
+		/*
+		 * Rebuild reader list
+		 */
+		if(_pcsc_wait_list_build(wait_context) < 0) {
+		    _pcsc_wait_context_clean(wait_context, 1, 1);
+		    return NULL;
+		}
+	    }
+	}
+    }
+}
+
+static void
+_pcsc_tag_wait_free(FreefareTagWaitContext wait_context)
+{
+    if(!wait_context || !wait_context->ctx || !(wait_context->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return;
+    }
+
+    if(wait_context->pcsc.context_handle < 0 ||
+	    wait_context->pcsc.context_handle > wait_context->ctx->reader_contexts_length ||
+	    !wait_context->ctx->reader_contexts[wait_context->pcsc.context_handle] ||
+	    !(wait_context->ctx->reader_contexts[wait_context->pcsc.context_handle]->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return;
+    }
+
+    _pcsc_wait_context_clean(wait_context, 1, 1);
+}
+
+/*
  * Low-level API
  */
 
@@ -1759,6 +2096,8 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 		.transceive_bytes = _pcsc_transceive_bytes,
 		.status_get = _pcsc_tag_status_get,
 		.status_free = _pcsc_tag_status_free,
+		.wait_next = _pcsc_tag_wait_next,
+		.wait_free = _pcsc_tag_wait_free,
 	},
 };
 

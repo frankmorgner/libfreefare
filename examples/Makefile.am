@@ -16,7 +16,8 @@ bin_PROGRAMS = mifare-classic-format \
 	       mifare-desfire-read-ndef \
 	       mifare-desfire-write-ndef \
 	       mifare-ultralight-info \
-	       mifare-any-info
+	       mifare-any-info \
+	       mifare-any-wait
 
 mifare_classic_format_SOURCES = mifare-classic-format.c
 mifare_classic_format_LDADD = $(top_builddir)/libfreefare/libfreefare.la
@@ -59,5 +60,8 @@ mifare_ultralight_info_LDADD = $(top_builddir)/libfreefare/libfreefare.la
 
 mifare_any_info_SOURCES = mifare-any-info.c
 mifare_any_info_LDADD = $(top_builddir)/libfreefare/libfreefare.la
+
+mifare_any_wait_SOURCES = mifare-any-wait.c
+mifare_any_wait_LDADD = $(top_builddir)/libfreefare/libfreefare.la
 
 CLEANFILES=	*.gcno

@@ -188,6 +188,8 @@ struct supported_reader {
     int(*transceive_bytes)(MifareTag tag, const uint8_t *send, size_t send_length, uint8_t *recv, size_t recv_length, int timeout);
     int(*status_get)(MifareTag tag, FreefareTagStatus *status);
     void(*status_free)(FreefareTagStatus *status);
+    MifareTag(*wait_next)(FreefareTagWaitContext wait_context, int timeout);
+    void(*wait_free)(FreefareTagWaitContext wait_context);
 };
 
 
@@ -377,6 +379,27 @@ struct freefare_context {
 	} pcsc;
 	enum mifare_tag_type tag_type;
     } enumeration_state;
+};
+
+struct freefare_tag_wait_context {
+    FreefareContext ctx;
+    FreefareFlags flags;
+    FreefareTagWaitArgument argument;
+    enum mifare_tag_type tag_type;
+    union {
+	struct {
+	    /*
+	     * FIXME Need reference counting for struct freefare_reader_context
+	     */
+	    int context_handle;
+	    LPTSTR reader_list;
+	    SCARD_READERSTATE *status, *status_backup;
+	    struct {
+		unsigned int tag_created:1;
+	    } *meta_status, *meta_status_backup;
+	    size_t status_length, status_backup_length;
+	} pcsc;
+    };
 };
 
 /*

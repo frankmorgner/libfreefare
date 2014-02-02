@@ -34,6 +34,7 @@ examples/mifare-desfire-read-ndef
 examples/mifare-desfire-write-ndef
 examples/mifare-ultralight-info
 examples/mifare-any-info
+examples/mifare-any-wait
 .autotools
 .cproject
 .project

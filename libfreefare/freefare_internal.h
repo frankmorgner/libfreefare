@@ -190,6 +190,7 @@ struct supported_reader {
     void(*status_free)(FreefareTagStatus *status);
     MifareTag(*wait_next)(FreefareTagWaitContext wait_context, int timeout);
     void(*wait_free)(FreefareTagWaitContext wait_context);
+    bool(*tag_is_present)(MifareTag tag);
 };
 
 
@@ -218,6 +219,7 @@ struct mifare_tag {
 	DWORD active_protocol;
 	unsigned int temp_connect:1;
 	LONG last_error;
+	DWORD last_state;
     } pcsc;
     const struct supported_tag *tag_info;
     const struct supported_reader *reader;

@@ -161,6 +161,8 @@ FreefareTagWaitContext freefare_tag_wait_new(FreefareContext ctx, FreefareFlags 
 MifareTag	 freefare_tag_wait_next(FreefareTagWaitContext wait_context, int timeout);
 void		 freefare_tag_wait_free(FreefareTagWaitContext wait_context);
 
+bool		 freefare_tag_is_present(MifareTag tag);
+
 FreefareTagStatus *freefare_tag_status_get(MifareTag tag, int status_version);
 void		 freefare_tag_status_free(FreefareTagStatus *status);
 
@@ -170,7 +172,6 @@ const char	*freefare_get_tag_friendly_name (MifareTag tag);
 char		*freefare_get_tag_uid (MifareTag tag);
 void		 freefare_free_tag (MifareTag tag);
 void		 freefare_free_tags (MifareTag *tags);
-bool		 freefare_selected_tag_is_present(nfc_device *device);
 
 const char	*freefare_strerror (MifareTag tag);
 int		 freefare_strerror_r (MifareTag tag, char *buffer, size_t len);

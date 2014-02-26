@@ -323,6 +323,20 @@ _libnfc_transceive_bytes(MifareTag tag, const uint8_t *send, size_t send_length,
     return r;
 }
 
+static LONG
+_pcsc_tag_get_reader_state(MifareTag tag, DWORD *state)
+{
+    SCARD_READERSTATE rgReaderStates[1];
+
+    rgReaderStates[0].szReader = tag->ctx->reader_devices[tag->pcsc.reader_device_handle]->pcsc.device_name;
+    rgReaderStates[0].dwCurrentState = SCARD_STATE_UNAWARE;
+
+    LONG rv = SCardGetStatusChange(tag->ctx->reader_devices[tag->pcsc.reader_device_handle]->pcsc.context, 0, rgReaderStates, 1);
+    *state = rgReaderStates[0].dwEventState;
+
+    return rv;
+}
+
 static const struct supported_tag *
 _pcsc_tag_type(FreefareContext ctx, FreefareFlags flags, struct freefare_reader_device *device, uint32_t share_mode, enum mifare_tag_type tag_type)
 {
@@ -476,6 +490,12 @@ _pcsc_tag_new(FreefareContext ctx, FreefareFlags flags, int device_handle, uint3
      */
     result->ctx->reader_devices[result->pcsc.reader_device_handle]->references++;
 
+    /*
+     * Set the last_state to some value, maybe. We'll ignore the return value and
+     * this is only used in tag_is_present anyways.
+     */
+    _pcsc_tag_get_reader_state(result, &result->pcsc.last_state);
+
     return result;
 }
 
@@ -547,6 +567,10 @@ _pcsc_connect(MifareTag tag)
 	share_mode = SCARD_SHARE_SHARED;
     }
     tag->pcsc.last_error = SCardConnect(rd->pcsc.context, rd->pcsc.device_name, share_mode, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1, &tag->pcsc.card, &tag->pcsc.active_protocol);
+    LONG rv = _pcsc_tag_get_reader_state(tag, &tag->pcsc.last_state);
+    if(rv != SCARD_S_SUCCESS) {
+	tag->pcsc.last_error = rv;
+    }
     return tag->pcsc.last_error == SCARD_S_SUCCESS;
 }
 
@@ -684,12 +708,60 @@ freefare_get_tag_uid (MifareTag tag)
     return res;
 }
 
-/*
- * Returns true if last selected tag is still present.
- */
-bool freefare_selected_tag_is_present(nfc_device *device)
+static bool
+_libnfc_tag_is_present(MifareTag tag)
 {
-    return (nfc_initiator_target_is_present(device, NULL) == NFC_SUCCESS);
+    if(!tag || !(tag->flags & FREEFARE_FLAG_READER_LIBNFC)) {
+	return 0;
+    }
+
+    if(tag->libnfc.tag_removed) {
+	return 0;
+    }
+
+    bool result = (nfc_initiator_target_is_present(tag->ctx->reader_devices[tag->libnfc.reader_device_handle]->libnfc, NULL) == NFC_SUCCESS);
+    if(!result) {
+	tag->libnfc.tag_removed = 1;
+    }
+
+    return result;
+}
+
+static bool
+_pcsc_tag_is_present(MifareTag tag)
+{
+    if(!tag || !tag->ctx || !(tag->flags & FREEFARE_FLAG_READER_PCSC)) {
+	return 0;
+    }
+
+    if(tag->pcsc.last_state & SCARD_STATE_EMPTY) {
+	return 0;
+    }
+
+    DWORD state = 0;
+    LONG rv = _pcsc_tag_get_reader_state(tag, &state);
+
+    switch(rv) {
+    case SCARD_S_SUCCESS:      /* Fall-through */
+    case SCARD_W_REMOVED_CARD: /* Fall-through */
+    case SCARD_W_RESET_CARD:
+	break;
+    default:
+	return 0;
+    }
+
+    if((state & 0xFFFF0000) != (tag->pcsc.last_state & 0xFFFF0000)) {
+	/* Permanently mark this card as gone */
+	tag->pcsc.last_state = SCARD_STATE_EMPTY;
+	return 0;
+    }
+
+    if(state & SCARD_STATE_EMPTY) {
+	tag->pcsc.last_state = state;
+	return 0;
+    } else {
+	return 1;
+    }
 }
 
 static int
@@ -1604,6 +1676,19 @@ freefare_tags_get (FreefareContext ctx, enum mifare_tag_type tag_type)
     return _freefare_tags_get(ctx, tag_type, &state);
 }
 
+/*
+ * Returns true if last selected tag is still present.
+ */
+bool
+freefare_tag_is_present(MifareTag tag)
+{
+    if(!tag || !tag->reader || !tag->reader->tag_is_present) {
+	return 0;
+    } else {
+	return tag->reader->tag_is_present(tag);
+    }
+}
+
 FreefareTagStatus *
 freefare_tag_status_get(MifareTag tag, int status_version)
 {
@@ -2096,6 +2181,7 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 		.disconnect = _libnfc_disconnect,
 		.transceive_bytes = _libnfc_transceive_bytes,
 		.status_get = _libnfc_tag_status_get,
+		.tag_is_present = _libnfc_tag_is_present,
 	},
 	{FREEFARE_FLAG_READER_PCSC,
 		.tag_free = _pcsc_tag_free,
@@ -2108,6 +2194,7 @@ const static struct supported_reader SUPPORTED_READERS[] = {
 		.status_free = _pcsc_tag_status_free,
 		.wait_next = _pcsc_tag_wait_next,
 		.wait_free = _pcsc_tag_wait_free,
+		.tag_is_present = _pcsc_tag_is_present,
 	},
 };
 

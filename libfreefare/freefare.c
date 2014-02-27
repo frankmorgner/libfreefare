@@ -100,6 +100,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 
 	reader_device->flags = FREEFARE_FLAG_READER_LIBNFC | (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT);
 	reader_device->internal = 1;
+	reader_device->references = 1;
 	reader_device->libnfc = reader_tag.libnfc.device;
 	int slot = _reader_device_store(ctx, reader_device);
 	if(slot < 0) {
@@ -118,6 +119,7 @@ freefare_tag_new_ex (FreefareContext ctx, FreefareFlags flags, FreefareReaderTag
 
 	reader_device->flags = FREEFARE_FLAG_READER_PCSC | (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT);
 	reader_device->internal = 1;
+	reader_device->references = 1;
 	reader_device->pcsc.context = reader_tag.pcsc.context;
 	reader_device->pcsc.device_name = strdup(reader_tag.pcsc.device_name);
 	if(!reader_device->pcsc.device_name) {
@@ -647,6 +649,7 @@ freefare_get_tags (nfc_device *device)
     reader_device->libnfc = device;
     reader_device->flags = FREEFARE_FLAG_READER_LIBNFC | (ctx->global_flags & FREEFARE_FLAG_MASK_GLOBAL_INHERIT);
     reader_device->internal = 1;
+    reader_device->references = 1;
 
     int slot = _reader_device_store(ctx, reader_device);
     if(slot < 0) {

@@ -1456,6 +1456,137 @@ abort:
     return NULL;
 }
 
+int
+freefare_context_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderContext context)
+{
+    if(!ctx) {
+	return -1;
+    }
+
+    if( (flags & FREEFARE_FLAG_READER_LIBNFC) && (flags & FREEFARE_FLAG_READER_PCSC) ) {
+	return -1;
+    }
+
+    int result = -1;
+
+    if(flags & FREEFARE_FLAG_READER_LIBNFC) {
+	struct freefare_reader_context *c = calloc(1, sizeof(*c));
+	if(!c) {
+	    return -1;
+	}
+	c->flags = flags;
+	c->libnfc = context.libnfc;
+
+	result = _reader_context_store(ctx, c);
+	if(result < 0) {
+	    _libnfc_context_free(c);
+	    return -1;
+	}
+    } else if(flags & FREEFARE_FLAG_READER_PCSC) {
+	struct freefare_reader_context *c = calloc(1, sizeof(*c));
+	if(!c) {
+	    return -1;
+	}
+	c->flags = flags;
+	c->pcsc = context.pcsc;
+
+	result = _reader_context_store(ctx, c);
+	if(result < 0) {
+	    _pcsc_context_free(c);
+	    return -1;
+	}
+    } else {
+	return -1;
+    }
+
+    return result;
+}
+
+int
+freefare_context_remove (FreefareContext ctx, int handle)
+{
+    if(!ctx || handle < 0 || handle >= ctx->reader_contexts_length || !ctx->reader_contexts[handle]) {
+	return -1;
+    }
+
+    if(ctx->reader_contexts[handle]->internal) {
+	return -1;
+    }
+
+    _reader_context_free(ctx->reader_contexts + handle);
+    return 0;
+}
+
+int
+freefare_device_add (FreefareContext ctx, FreefareFlags flags, FreefareReaderDevice device)
+{
+    if(!ctx) {
+	return -1;
+    }
+
+    if( (flags & FREEFARE_FLAG_READER_LIBNFC) && (flags & FREEFARE_FLAG_READER_PCSC) ) {
+	return -1;
+    }
+
+    int result = -1;
+
+    if(flags & FREEFARE_FLAG_READER_LIBNFC) {
+	struct freefare_reader_device *d = calloc(1, sizeof(*d));
+	if(!d) {
+	    return -1;
+	}
+	d->flags = flags;
+	d->references = 1;
+	d->libnfc = device.libnfc;
+
+	result = _reader_device_store(ctx, d);
+	if(result < 0) {
+	    _libnfc_device_free(d);
+	    return -1;
+	}
+    } else if(flags & FREEFARE_FLAG_READER_PCSC) {
+	struct freefare_reader_device *d = calloc(1, sizeof(*d));
+	if(!d) {
+	    return -1;
+	}
+	d->flags = flags;
+	d->references = 1;
+	d->pcsc.context = device.pcsc.context;
+	d->pcsc.device_name = strdup(device.pcsc.device_name);
+
+	if(!d->pcsc.device_name) {
+	    _pcsc_device_free(d);
+	    return -1;
+	}
+
+	result = _reader_device_store(ctx, d);
+	if(result < 0) {
+	    _pcsc_device_free(d);
+	    return -1;
+	}
+    } else {
+	return -1;
+    }
+
+    return result;
+}
+
+int
+freefare_device_remove (FreefareContext ctx, int handle)
+{
+    if(!ctx || handle < 0 || handle >= ctx->reader_devices_length || !ctx->reader_devices[handle]) {
+	return -1;
+    }
+
+    if(ctx->reader_devices[handle]->internal) {
+	return -1;
+    }
+
+    _reader_device_free(ctx->reader_devices + handle);
+    return 0;
+}
+
+
 static MifareTag
 _freefare_tag_next (FreefareContext ctx, struct freefare_enumeration_state *state)
 {

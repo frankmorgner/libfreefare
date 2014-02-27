@@ -121,7 +121,6 @@ typedef union {
     } libnfc;
     struct {
 	int context_handle;
-	int device_handle;
     } pcsc;
     char _dummy[64];
 } FreefareTagWaitArgument;
@@ -134,11 +133,7 @@ typedef union {
 #define FREEFARE_DEVICE_PCSC(ctx, device_name)		(FreefareReaderDevice){.pcsc = {ctx, device_name}}
 #define FREEFARE_TAG_PCSC(ctx, device_name, share_mode)	(FreefareReaderTag){.pcsc = {ctx, device_name, share_mode}}
 
-#define FREEFARE_TAG_WAIT_LIBNFC(period, device_handle)	(FreefareTagWaitArgument){.libnfc = {period, device_handle}}
-#define FREEFARE_TAG_WAIT_LIBNFC_AUTO(period)		FREEFARE_TAG_WAIT_LIBNFC(period, -1)
-
-#define FREEFARE_TAG_WAIT_PCSC_CONTEXT(context_handle)	(FreefareTagWaitArgument){.pcsc = {context_handle, -1}}
-#define FREEFARE_TAG_WAIT_PCSC_DEVICE(device_handle)	(FreefareTagWaitArgument){.pcsc = {-1, device_handle}}
+#define FREEFARE_TAG_WAIT_PCSC_CONTEXT(context_handle)	(FreefareTagWaitArgument){.pcsc = {context_handle}}
 #define FREEFARE_TAG_WAIT_PCSC_AUTO()			FREEFARE_TAG_WAIT_PCSC_CONTEXT(-1)
 
 FreefareContext	 freefare_init (FreefareFlags flags);

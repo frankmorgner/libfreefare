@@ -363,7 +363,7 @@ authenticate (MifareTag tag, uint8_t cmd, uint8_t key_no, MifareDESFireKey key)
     MIFARE_DESFIRE (tag)->authentication_scheme = (AUTHENTICATE_LEGACY == cmd) ? AS_LEGACY : AS_NEW;
 
     BUFFER_INIT (cmd1, 2);
-    BUFFER_INIT (res, 17);
+    BUFFER_INIT (res, 25);
 
     BUFFER_APPEND (cmd1, cmd);
     BUFFER_APPEND (cmd1, key_no);
